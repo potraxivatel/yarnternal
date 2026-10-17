@@ -20,6 +20,9 @@
 	"entrypoints": {
 		"main": [
 			"yarnternal.lol.core.Yarnternal"
+		],
+		"client": [
+			"yarnternal.lol.core.YarnternalClient"
 		]
 	},
 	"mixins": [
