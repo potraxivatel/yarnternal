@@ -6,9 +6,9 @@
 	"description": "СНИМИ 0К0ВЫ ЧТ0 Т3БЯ СК0ВЫВ4ЮТ",
 	"authors": [
 		"Foks",
-    "Lenni",
-    "Lennikorm",
-    "percentageII"
+		"Lenni",
+		"Lennikorm",
+		"percentageII"
 	],
 	"contact": {
 		"homepage": "https://fabricmc.net/",
@@ -17,6 +17,11 @@
 	"license": "CC0-1.0",
 	"icon": "assets/yarnternal/icon.png",
 	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"yarnternal.lol.core.Yarnternal"
+		]
+	},
 	"mixins": [
 		"yarnternal.mixins.json"
 	],
