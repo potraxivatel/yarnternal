@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# ============================================================
+#   loader — запуск клиента Yarnternal
+#
+#   Использование:
+#       ./loader            собрать (если нужно) и запустить игру
+#       ./loader --rebuild  пересобрать мод принудительно
+#
+#   Что делает:
+#       1) находит Java 25 (нужна для сборки fabric-loom)
+#       2) собирает мод через ./gradlew build
+#       3) копирует jar в папку модов инстанса Prism "1.21.11"
+#       4) запускает игру
+# ============================================================
+set -e
+
+cd "$(dirname "$0")"
+
+INSTANCE="1.21.11"
+PRISM_DATA="$HOME/.local/share/PrismLauncher"
+MODS_DIR="$PRISM_DATA/instances/$INSTANCE/minecraft/mods"
+
+REBUILD=0
+if [ "${1:-}" = "--rebuild" ]; then
+    REBUILD=1
+fi
+
+echo "=== Yarnternal loader ==="
+
+# --- 1. Java (для сборки нужен JDK 25 — требование fabric-loom) ---
+java_major() {
+    "$1/bin/javac" -version 2>&1 | sed -E 's/^javac ([0-9]+).*/\1/'
+}
+
+find_java() {
+    for d in "$HOME"/jdk/jdk-*; do
+        if [ -x "$d/bin/javac" ] && [ "$(java_major "$d")" -ge 25 ] 2>/dev/null; then
+            echo "$d"; return 0
+        fi
+    done
+    if command -v javac >/dev/null 2>&1; then
+        local d
+        d="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+        if [ "$(java_major "$d")" -ge 25 ] 2>/dev/null; then
+            echo "$d"; return 0
+        fi
+    fi
+    for d in "$PRISM_DATA"/java/java-runtime-*; do
+        if [ -x "$d/bin/javac" ] && [ "$(java_major "$d")" -ge 25 ] 2>/dev/null; then
+            echo "$d"; return 0
+        fi
+    done
+    return 1
+}
+
+if ! JAVA_HOME="$(find_java)"; then
+    echo "Для сборки нужна Java 25 (требование fabric-loom), но она не найдена."
+    echo "Скачай JDK 25: https://adoptium.net/temurin/releases/?version=25"
+    exit 1
+fi
+export JAVA_HOME
+echo "Java: $( "$JAVA_HOME/bin/java" -version 2>&1 | head -n1 )"
+
+# --- 2. Сборка мода ---
+jars() { ls build/libs/yarnternal-*.jar 2>/dev/null | grep -vE 'sources|dev' || true; }
+
+JAR="$(jars | head -n1)"
+if [ "$REBUILD" = "1" ] || [ -z "$JAR" ] || [ -n "$(find src -newer "$JAR" -name '*.java' -print -quit 2>/dev/null)" ]; then
+    echo "Собираю мод (в первый раз скачивается Gradle, может занять несколько минут)..."
+    ./gradlew build --console=plain -q
+    JAR="$(jars | head -n1)"
+fi
+
+if [ -z "$JAR" ] || [ ! -f "$JAR" ]; then
+    echo "Ошибка: собранный jar не найден (build/libs пустая)."
+    exit 1
+fi
+echo "Мод собран: $JAR"
+
+# --- 3. Установка в инстанс ---
+mkdir -p "$MODS_DIR"
+rm -f "$MODS_DIR"/yarnternal-*.jar
+cp "$JAR" "$MODS_DIR/"
+echo "Установлен в: $MODS_DIR"
+
+# --- 4. Запуск игры через Prism ---
+PRISM="$HOME/Загрузки/PrismLauncher-Linux-x86_64.AppImage"
+if [ ! -x "$PRISM" ]; then
+    PRISM="$(command -v prismlauncher || true)"
+fi
+if [ -z "$PRISM" ] || [ ! -x "$PRISM" ]; then
+    echo "Prism Launcher не найден — запусти игру сам, мод уже установлен."
+    exit 1
+fi
+
+echo "Запускаю Minecraft (инстанс $INSTANCE)..."
+nohup "$PRISM" --launch "$INSTANCE" >/dev/null 2>&1 &
+echo "Готово!"
