@@ -7,6 +7,7 @@ import net.minecraft.text.StyleSpriteSource;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import yarnternal.lol.api.utility.render.color.ColorUtil;
+import yarnternal.lol.core.Yarnternal;
 
 /**
  * Render утилита — обёртки для рисования в HUD через DrawContext.
@@ -62,6 +63,72 @@ public final class RenderUtil {
     public static void panel(DrawContext context, float x, float y, float width, float height, int background, int border) {
         fill(context, x, y, width, height, background);
         outline(context, x, y, width, height, border);
+    }
+
+    // ── Тема клиента: бегущая полоса ─────────────────────────────────────────
+    // Краски темы хранятся в главном классе (Yarnternal) — тут только движение
+    // полосы: две краски плавно заменяют друг друга, и полоса едет по экрану
+    // и по времени. Сменил стиль в главном классе — рисунок перекрасился сам.
+
+    /** Длина полного цикла «краска1 → краска2 → краска1» в пикселях. */
+    private static float waveLength = 160.0f;
+
+    /** Скорость полосы: сколько полных циклов в секунду проезжает одна точка. */
+    private static float waveSpeed = 0.35f;
+
+    /** Меняет длину полосы в пикселях (минимум 16, иначе полоса превращается в шум). */
+    public static void setWaveLength(float length) {
+        waveLength = Math.max(16.0f, length);
+    }
+
+    /** Меняет скорость полосы. */
+    public static void setWaveSpeed(float speed) {
+        waveSpeed = speed;
+    }
+
+    /** Цвет полосы в экранной точке x (по вертикали не смещается). */
+    public static int waveColor(float x) {
+        return waveColor(x, 0.0f);
+    }
+
+    /** Цвет полосы в экранной точке (x, y): по y волна идёт медленнее — получается лёгкая диагональ. */
+    public static int waveColor(float x, float y) {
+        Yarnternal client = Yarnternal.getInstance();
+        float time = (System.currentTimeMillis() % 100_000L) / 1000.0f;
+        return ColorUtil.wave(client.getColorOne(), client.getColorTwo(), x / waveLength + y / (waveLength * 2.0f) - time * waveSpeed);
+    }
+
+    /** Заливает прямоугольник полосой темы: шаг 4px — переходы плавные и без лишних квадов. */
+    public static void fillWave(DrawContext context, float x, float y, float width, float height) {
+        float step = 4.0f;
+        for (float offset = 0.0f; offset < width; offset += step) {
+            float segment = Math.min(step, width - offset);
+            fill(context, x + offset, y, segment + 0.5f, height, waveColor(x + offset, y));
+        }
+    }
+
+    /** Обводка толщиной 1px, нарисованная полосой темы. */
+    public static void outlineWave(DrawContext context, float x, float y, float width, float height) {
+        fillWave(context, x, y, width, 1.0f);
+        fillWave(context, x, y + height - 1.0f, width, 1.0f);
+        fill(context, x, y, 1.0f, height, waveColor(x, y));
+        fill(context, x + width - 1.0f, y, 1.0f, height, waveColor(x + width, y));
+    }
+
+    /** Тёмная подложка панели: текущий цвет полосы, сильно затемнённый; alpha 0..255. */
+    public static int waveBackground(float x, float alpha) {
+        return ColorUtil.withAlpha(ColorUtil.multiply(waveColor(x), 0.22f), Math.round(alpha));
+    }
+
+    /** Панель в стиле: тёмная подложка + рамка полосой. alpha — прозрачность подложки (0..255). */
+    public static void panelWave(DrawContext context, float x, float y, float width, float height, float alpha) {
+        fill(context, x, y, width, height, waveBackground(x, alpha));
+        outlineWave(context, x, y, width, height);
+    }
+
+    /** Текст цветом полосы в своей точке — заголовки медленно переливаются. */
+    public static void textWave(DrawContext context, TextRenderer textRenderer, String text, float x, float y) {
+        text(context, textRenderer, text, x, y, waveColor(x, y));
     }
 
     // ── Шрифты ───────────────────────────────────────────────────────────────

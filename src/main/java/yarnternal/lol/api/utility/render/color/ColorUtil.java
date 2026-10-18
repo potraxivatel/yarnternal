@@ -77,6 +77,20 @@ public final class ColorUtil {
         );
     }
 
+    /** Бегущая «полоса» между двумя цветами: phase 0 → from, 0.5 → to, 1 → снова from
+     *  (значения вне 0..1 заворачиваются). Переход сглажен — резких «углов» не видно. */
+    public static int wave(int from, int to, float phase) {
+        float p = phase - (float) Math.floor(phase);
+        float triangle = p < 0.5f ? p * 2.0f : 2.0f - p * 2.0f;
+        return lerp(from, to, smoothstep(triangle));
+    }
+
+    /** Сглаживает линейный ход 0..1 → 0..1: убирает резкие «углы» на стыках. */
+    private static float smoothstep(float t) {
+        float x = MathUtil.clamp(t, 0.0f, 1.0f);
+        return x * x * (3.0f - 2.0f * x);
+    }
+
     /** Цвет из HSV: hue 0..360, saturation/value 0..1, alpha 0-255. */
     public static int hsv(float hue, float saturation, float value, int alpha) {
         float h = (hue % 360.0f + 360.0f) % 360.0f;

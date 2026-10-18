@@ -5,13 +5,12 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import yarnternal.lol.api.utility.render.RenderUtil;
 import yarnternal.lol.api.utility.render.color.ColorUtil;
-import yarnternal.lol.common.ui.style.Style;
 
 /**
  * Цветной тест — панель, которая каждый кадр рисуется поверх игры.
- * Верх панели — в стиле клиента (Style: два цвета заменяют друг друга бегущей
- * полосой), ниже — проверка RenderUtil и ColorUtil: градиенты, палитра,
- * прозрачность и анимированная радуга.
+ * Верх панели — в стиле клиента (RenderUtil: две краски заменяют друг друга
+ * бегущей полосой), ниже — проверка RenderUtil и ColorUtil: градиенты,
+ * палитра, прозрачность и анимированная радуга.
  */
 public final class ColorTestHud {
 
@@ -30,13 +29,13 @@ public final class ColorTestHud {
         float height = 104.0f;
 
         // панель и рамка — уже в стиле клиента
-        Style.panel(context, x, y, width, height, 200.0f);
+        RenderUtil.panelWave(context, x, y, width, height, 200.0f);
 
         // заголовок переливается цветами темы
-        Style.text(context, textRenderer, "Yarnternal — стиль клиента", x + 6.0f, y + 5.0f);
+        RenderUtil.textWave(context, textRenderer, "Yarnternal — стиль клиента", x + 6.0f, y + 5.0f);
 
-        // полоса темы: два цвета бегут и заменяют друг друга
-        Style.fill(context, x + 6.0f, y + 18.0f, 174.0f, 10.0f);
+        // полоса темы: две краски бегут и заменяют друг друга
+        RenderUtil.fillWave(context, x + 6.0f, y + 18.0f, 174.0f, 10.0f);
 
         // вертикальный и горизонтальный градиенты
         RenderUtil.fillGradient(context, x + 6.0f, y + 32.0f, 84.0f, 10.0f, ColorUtil.rgb(255, 85, 85), ColorUtil.rgb(85, 85, 255));
