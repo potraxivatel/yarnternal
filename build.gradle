@@ -19,6 +19,42 @@ loom {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// dev-запуск: ./loader -> ./gradlew runClient
+// Ник и ОЗУ прилетают из лоадера: -PmcUsername=Foks -PmcRam=4G
+// (если не передали — берутся значения по умолчанию)
+// ---------------------------------------------------------------------------
+def devUsername = providers.gradleProperty("mcUsername").getOrElse("Player")
+def devRam = providers.gradleProperty("mcRam").getOrElse("4G")
+
+// LWJGL 3.3.3 по умолчанию подсовывает свой libjemalloc.so (org.lwjgl.system.allocator
+// = jemalloc). На musl (Alpine) он падает с SIGSEGV прямо при создании окна игры.
+// Если система на musl — переключаем LWJGL на системный аллокатор.
+def musl = new File('/lib/ld-musl-x86_64.so.1').exists()
+
+// LWJGL 3.3.3 тащит OpenAL Soft 1.23.1, у которой семафоры (sem_init/sem_post)
+// бросают std::system_error на musl. Исключение вылетает в потоке микшера, его
+// никто не ловит → terminate и крах сразу после инициализации GL.
+// Системный OpenAL (1.25.x) собран под musl и работает — берём его.
+def systemOpenAl = ['/usr/lib/libopenal.so.1', '/usr/lib64/libopenal.so.1']
+		.collect { new File(it) }
+		.find { it.exists() }
+
+loom {
+	runs {
+		client {
+			programArgs "--username", devUsername
+			vmArgs "-Xmx${devRam}"
+			if (musl) {
+				vmArgs "-Dorg.lwjgl.system.allocator=system"
+			}
+			if (musl && systemOpenAl != null) {
+				vmArgs "-Dorg.lwjgl.openal.libname=${systemOpenAl}"
+			}
+		}
+	}
+}
+
 dependencies {
 	// To change the versions see the gradle.properties file
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"

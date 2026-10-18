@@ -16,13 +16,10 @@
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/yarnternal/icon.png",
-	"environment": "*",
+	"environment": "client",
 	"entrypoints": {
 		"main": [
 			"yarnternal.lol.core.Yarnternal"
-		],
-		"client": [
-			"yarnternal.lol.core.YarnternalClient"
 		]
 	},
 	"mixins": [

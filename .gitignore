@@ -38,3 +38,10 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+
+# питоновский кэш (лоадер на питоне)
+__pycache__/
+*.pyc
+
+# Go-лоадер: собранный бинарник
+/loader-go/loader-go

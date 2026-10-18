@@ -1,98 +1,604 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # ============================================================
-#   loader — запуск клиента Yarnternal
+#   YARNNTERNAL · loader
+#
+#   Dev-запуск клиента: ./gradlew runClient
 #
 #   Использование:
-#       ./loader            собрать (если нужно) и запустить игру
-#       ./loader --rebuild  пересобрать мод принудительно
+#       ./loader                        интерактивное меню
+#       ./loader --run                  запустить сразу (настройки из run/loader.conf)
+#       ./loader -u Foks -r 6G -l en_us [--run]
+#       ./loader --prism                собрать jar, поставить в Prism и запустить
+#       ./loader --dry                  проверить настройки, ничего не запуская
+#       ./loader --help
 #
-#   Что делает:
-#       1) находит Java 25 (нужна для сборки fabric-loom)
-#       2) собирает мод через ./gradlew build
-#       3) копирует jar в папку модов инстанса Prism "1.21.11"
-#       4) запускает игру
+#   Настройки хранятся в run/loader.conf (папка run/ в .gitignore).
+#   У bash-версии лоадера всё то же самое — она лежит рядом в loader.sh.
 # ============================================================
-set -e
+from __future__ import annotations
 
-cd "$(dirname "$0")"
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
 
-INSTANCE="1.21.11"
-PRISM_DATA="$HOME/.local/share/PrismLauncher"
-MODS_DIR="$PRISM_DATA/instances/$INSTANCE/minecraft/mods"
+ROOT = Path(__file__).resolve().parent
+os.chdir(ROOT)
 
-REBUILD=0
-if [ "${1:-}" = "--rebuild" ]; then
-    REBUILD=1
-fi
+try:
+    from rich.align import Align
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.text import Text
+except ImportError:
+    sys.stderr.write(
+        "\n  нет библиотеки rich — поставь её:\n\n"
+        "      python3 -m pip install --user --break-system-packages rich\n\n"
+    )
+    sys.exit(1)
 
-echo "=== Yarnternal loader ==="
+# ── пути ────────────────────────────────────────────────────────────────────
+CONFIG_FILE = ROOT / "run" / "loader.conf"
+GRADLE_HOME = Path(os.environ.get("GRADLE_USER_HOME", Path.home() / ".gradle"))
+ASSETS_DIR = GRADLE_HOME / "caches" / "fabric-loom" / "assets"
 
-# --- 1. Java (для сборки нужен JDK 25 — требование fabric-loom) ---
-java_major() {
-    "$1/bin/javac" -version 2>&1 | sed -E 's/^javac ([0-9]+).*/\1/'
-}
+PRISM_INSTANCE = "1.21.11"
+PRISM_DIR = Path.home() / ".local/share/PrismLauncher/instances" / PRISM_INSTANCE
+PRISM_APP = Path.home() / "Загрузки" / "PrismLauncher-Linux-x86_64.AppImage"
 
-find_java() {
-    for d in "$HOME"/jdk/jdk-*; do
-        if [ -x "$d/bin/javac" ] && [ "$(java_major "$d")" -ge 25 ] 2>/dev/null; then
-            echo "$d"; return 0
-        fi
-    done
-    if command -v javac >/dev/null 2>&1; then
-        local d
-        d="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
-        if [ "$(java_major "$d")" -ge 25 ] 2>/dev/null; then
-            echo "$d"; return 0
-        fi
-    fi
-    for d in "$PRISM_DATA"/java/java-runtime-*; do
-        if [ -x "$d/bin/javac" ] && [ "$(java_major "$d")" -ge 25 ] 2>/dev/null; then
-            echo "$d"; return 0
-        fi
-    done
-    return 1
-}
+VERSION = "0.1.0"
 
-if ! JAVA_HOME="$(find_java)"; then
-    echo "Для сборки нужна Java 25 (требование fabric-loom), но она не найдена."
-    echo "Скачай JDK 25: https://adoptium.net/temurin/releases/?version=25"
-    exit 1
-fi
-export JAVA_HOME
-echo "Java: $( "$JAVA_HOME/bin/java" -version 2>&1 | head -n1 )"
+# ── палитра ─────────────────────────────────────────────────────────────────
+# Два цвета градиента логотипа — те самые «два цвета», полосой, как в примере.
+GRAD_TOP = "#C74BFF"
+GRAD_BOT = "#4C63FF"
+BORDER = "#8A46E8"
+GREEN = "#7CE38B"
+PURPLE = "#B98CFF"
+GRAY = "#8A8A9E"
+DIM = "#5F5F73"
+YELLOW = "#E8D96A"
+RED = "#F26D6D"
+CYAN = "#66D9FF"
 
-# --- 2. Сборка мода ---
-jars() { ls build/libs/yarnternal-*.jar 2>/dev/null | grep -vE 'sources|dev' || true; }
+# ── логотип ─────────────────────────────────────────────────────────────────
+# Лого берётся из logo.txt рядом с лоадером — туда можно вставить любой свой
+# ASCII (отступы строк сохраняются как есть). Если файла нет — используется
+# встроенный вариант: широкий (ansi_regular), а на узком терминале маленький.
+LOGO_FILE = ROOT / "logo.txt"
 
-JAR="$(jars | head -n1)"
-if [ "$REBUILD" = "1" ] || [ -z "$JAR" ] || [ -n "$(find src -newer "$JAR" -name '*.java' -print -quit 2>/dev/null)" ]; then
-    echo "Собираю мод (в первый раз скачивается Gradle, может занять несколько минут)..."
-    ./gradlew build --console=plain -q
-    JAR="$(jars | head -n1)"
-fi
+LOGO_WIDE = (
+    '██    ██  █████  ██████  ███    ██ ████████ ███████ ██████  ███    ██  █████  ██',
+    ' ██  ██  ██   ██ ██   ██ ████   ██    ██    ██      ██   ██ ████   ██ ██   ██ ██',
+    '  ████   ███████ ██████  ██ ██  ██    ██    █████   ██████  ██ ██  ██ ███████ ██',
+    '   ██    ██   ██ ██   ██ ██  ██ ██    ██    ██      ██   ██ ██  ██ ██ ██   ██ ██',
+    '   ██    ██   ██ ██   ██ ██   ████    ██    ███████ ██   ██ ██   ████ ██   ██ ███████',
+)
 
-if [ -z "$JAR" ] || [ ! -f "$JAR" ]; then
-    echo "Ошибка: собранный jar не найден (build/libs пустая)."
-    exit 1
-fi
-echo "Мод собран: $JAR"
+LOGO_SMALL = (
+    '__   ___   ___ _  _ _____ ___ ___ _  _   _   _',
+    '\\ \\ / /_\\ | _ \\ \\| |_   _| __| _ \\ \\| | /_\\ | |',
+    ' \\ V / _ \\|   / .` | | | | _||   / .` |/ _ \\| |__',
+    '  |_/_/ \\_\\_|_\\_|\\_| |_| |___|_|_\\_|\\_/_/ \\_\\____|',
+)
 
-# --- 3. Установка в инстанс ---
-mkdir -p "$MODS_DIR"
-rm -f "$MODS_DIR"/yarnternal-*.jar
-cp "$JAR" "$MODS_DIR/"
-echo "Установлен в: $MODS_DIR"
 
-# --- 4. Запуск игры через Prism ---
-PRISM="$HOME/Загрузки/PrismLauncher-Linux-x86_64.AppImage"
-if [ ! -x "$PRISM" ]; then
-    PRISM="$(command -v prismlauncher || true)"
-fi
-if [ -z "$PRISM" ] || [ ! -x "$PRISM" ]; then
-    echo "Prism Launcher не найден — запусти игру сам, мод уже установлен."
-    exit 1
-fi
+def load_logo() -> list[str] | None:
+    """Лого из logo.txt. Пустые строки по краям отбрасываются, отступы — нет."""
+    if not LOGO_FILE.is_file():
+        return None
+    lines = [line.rstrip() for line in LOGO_FILE.read_text(encoding="utf-8").splitlines()]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines or None
 
-echo "Запускаю Minecraft (инстанс $INSTANCE)..."
-nohup "$PRISM" --launch "$INSTANCE" >/dev/null 2>&1 &
-echo "Готово!"
+console = Console()
+
+# ── настройки ───────────────────────────────────────────────────────────────
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
+RAM_RE = re.compile(r"^[0-9]+[GgMm]$")
+LANG_RE = re.compile(r"^[a-z]{2}_[a-z]{2}$")
+
+
+@dataclass
+class Settings:
+    """Что игрок выбрал: ник, озу и язык. Живёт в run/loader.conf."""
+
+    username: str = "Foks"
+    ram: str = "4G"
+    lang: str = "ru_ru"
+
+    def save(self) -> None:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(
+            f"username={self.username}\nram={self.ram}\nlang={self.lang}\n",
+            encoding="utf-8",
+        )
+
+
+def load_settings() -> Settings:
+    settings = Settings()
+    if CONFIG_FILE.is_file():
+        for line in CONFIG_FILE.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key == "username":
+                settings.username = value
+            elif key == "ram":
+                settings.ram = value
+            elif key == "lang":
+                settings.lang = value
+    return settings
+
+
+# ── вывод ───────────────────────────────────────────────────────────────────
+def lerp_hex(start: str, end: str, t: float) -> str:
+    """Плавный переход между двумя hex-цветами, t = 0..1."""
+    a = tuple(int(start[i:i + 2], 16) for i in (1, 3, 5))
+    b = tuple(int(end[i:i + 2], 16) for i in (1, 3, 5))
+    return "#%02X%02X%02X" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
+
+def info(text: str) -> None:
+    console.print(Text("   " + text, style=GRAY))
+
+
+def ok(text: str) -> None:
+    line = Text("   ")
+    line.append("✔", style=GREEN)
+    line.append(" " + text)
+    console.print(line)
+
+
+def warn(text: str) -> None:
+    line = Text("   ")
+    line.append("!", style=YELLOW)
+    line.append(" " + text)
+    console.print(line)
+
+
+def err(text: str) -> None:
+    line = Text("   ")
+    line.append("✘", style=RED)
+    line.append(" " + text)
+    console.print(line)
+
+
+def banner() -> None:
+    """Логотип YARNTERNAL с вертикальным градиентом по двум цветам, в рамке."""
+    logo = load_logo() or (LOGO_WIDE if console.width >= 96 else LOGO_SMALL)
+    width = max(len(line) for line in logo)
+
+    art = Text()
+    last = max(1, len(logo) - 1)
+    for i, line in enumerate(logo):
+        if i:
+            art.append("\n")
+        # добиваем строку до общей ширины: тогда центрирование rich не сдвинет буквы
+        art.append(line.ljust(width), style=lerp_hex(GRAD_TOP, GRAD_BOT, i / last))
+    art.append("\n" + f"v{VERSION} — dev loader".center(width), style=DIM)
+
+    console.print()
+    # Align.center центрирует только саму рамку; justify="center" у print ещё и
+    # сдвигал бы строки лого внутри панели (проверено)
+    console.print(Align.center(Panel(art, border_style=BORDER, expand=False, padding=(1, 3))))
+
+
+def settings_line(settings: Settings) -> Text:
+    """Строка как «Memory: … | Provider: …» из примера — текущие настройки."""
+    line = Text("   ")
+    fields = (("Память", settings.ram), ("Ник", settings.username), ("Язык", settings.lang))
+    for i, (label, value) in enumerate(fields):
+        if i:
+            line.append("   |   ", style=DIM)
+        line.append(label + ": ", style=PURPLE)
+        line.append(value, style="bold white")
+    return line
+
+
+def menu_item(key: str, label: str, hint: str = "") -> Text:
+    line = Text("   ")
+    line.append(f"[{key}]", style=f"bold {GREEN}")
+    line.append(" " + label, style="bold white")
+    if hint:
+        line.append("   " + hint, style=DIM)
+    return line
+
+
+def ask(question: str, hint: str = "") -> str | None:
+    """Ввод строки. None — если stdin закрылся (Ctrl+D или конец пайпа)."""
+    prompt = Text("   ")
+    prompt.append("?", style=CYAN)
+    prompt.append(" " + question, style="bold white")
+    if hint:
+        prompt.append(" " + hint, style=DIM)
+    prompt.append(": ")
+    try:
+        return console.input(prompt)
+    except EOFError:
+        return None
+
+
+def menu_prompt() -> str | None:
+    prompt = Text("   ")
+    prompt.append("Выбор ", style="bold white")
+    prompt.append("[1/2/3/4/5/0]", style=GREEN)
+    prompt.append(": ")
+    try:
+        return console.input(prompt)
+    except EOFError:
+        return None
+
+
+def pause() -> None:
+    try:
+        console.input(Text("   Enter — назад в меню...", style=DIM))
+    except EOFError:
+        pass
+
+
+# ── валидация ───────────────────────────────────────────────────────────────
+def validate_all(settings: Settings) -> bool:
+    bad = False
+    if not USERNAME_RE.fullmatch(settings.username):
+        err(f"ник «{settings.username}»: 3-16 символов, A-Z a-z 0-9 _")
+        bad = True
+    if not RAM_RE.fullmatch(settings.ram):
+        err(f"озу «{settings.ram}»: формат 4G или 2048M")
+        bad = True
+    if not LANG_RE.fullmatch(settings.lang):
+        err(f"язык «{settings.lang}»: формат xx_yy (ru_ru)")
+        bad = True
+    return not bad
+
+
+# ── язык игры ───────────────────────────────────────────────────────────────
+# У Minecraft нет аргумента командной строки для языка — он лежит в options.txt.
+# Поэтому аккуратно правим одну строку: убираем старую lang: и дописываем новую.
+def patch_lang(path: Path, lang: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    if path.is_file():
+        lines = [
+            line
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
+            if not line.startswith("lang:")
+        ]
+    lines.append(f"lang:{lang}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+# ── java ────────────────────────────────────────────────────────────────────
+def java_probe(java: Path) -> tuple[int, str] | None:
+    """(мажорная версия, первая строка java -version) или None."""
+    try:
+        proc = subprocess.run([str(java), "-version"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = (proc.stderr or proc.stdout).splitlines()
+    if not lines:
+        return None
+    match = re.search(r'version "(\d+)(?:\.(\d+))?', lines[0])
+    if not match:
+        return None
+    major = int(match.group(1))
+    if major == 1 and match.group(2):
+        major = int(match.group(2))
+    return major, lines[0]
+
+
+def find_java() -> tuple[Path, str] | None:
+    candidates: list[Path] = []
+    for directory in sorted((Path.home() / "jdk").glob("jdk-*")):
+        if (directory / "bin" / "java").is_file():
+            candidates.append(directory)
+    system_java = shutil.which("java")
+    if system_java:
+        candidates.append(Path(system_java).resolve().parent.parent)
+    for directory in candidates:
+        probed = java_probe(directory / "bin" / "java")
+        if probed and probed[0] >= 21:
+            return directory, probed[1]
+    return None
+
+
+def setup_java() -> bool:
+    found = find_java()
+    if found is None:
+        err("не нашёл Java 21+ — поставь JDK и повтори")
+        return False
+    jdk, version = found
+    os.environ["JAVA_HOME"] = str(jdk)
+    info(f"java: {version}")
+    return True
+
+
+# ── запуск: dev через gradlew runClient ─────────────────────────────────────
+def run_runclient(settings: Settings) -> None:
+    if not setup_java():
+        return
+    patch_lang(ROOT / "run" / "options.txt", settings.lang)
+    info(f"язык игры: {settings.lang}")
+    info(f"./gradlew runClient -PmcUsername={settings.username} -PmcRam={settings.ram}")
+    if not ASSETS_DIR.is_dir():
+        warn("первый запуск: Gradle скачает ассеты игры (~500 МБ), это надолго")
+    console.print()
+    console.print(Text("   ▸ ЗАПУСКАЮ YARNTERNAL...", style=f"bold {GREEN}"))
+    console.print()
+    try:
+        subprocess.run(
+            ["./gradlew", "runClient",
+             f"-PmcUsername={settings.username}", f"-PmcRam={settings.ram}",
+             "--console=plain"],
+            check=False,
+        )
+    except KeyboardInterrupt:
+        console.print()
+        warn("прервано")
+        return
+    console.print()
+    ok("игра закрыта")
+
+
+# ── запуск: сборка jar + PrismLauncher (реальный аккаунт, можно на сервера) ──
+def run_prism(settings: Settings) -> None:
+    if not setup_java():
+        return
+
+    console.print(Text("   ▸ собираю мод...", style=GREEN))
+    build = subprocess.run(["./gradlew", "build", "--console=plain", "-q"], check=False)
+    if build.returncode != 0:
+        err("сборка упала — смотри вывод gradle выше")
+        return
+
+    jars = [
+        jar for jar in sorted((ROOT / "build" / "libs").glob("yarnternal-*.jar"))
+        if "sources" not in jar.name and "dev" not in jar.name
+    ]
+    if not jars:
+        err("jar не найден в build/libs")
+        return
+    jar = jars[0]
+
+    mods_dir = PRISM_DIR / "minecraft" / "mods"
+    mods_dir.mkdir(parents=True, exist_ok=True)
+    for old in mods_dir.glob("yarnternal-*.jar"):
+        old.unlink()
+    shutil.copy(jar, mods_dir / jar.name)
+    ok(f"мод установлен: {jar.relative_to(ROOT)}")
+
+    if (PRISM_DIR / "minecraft").is_dir():
+        patch_lang(PRISM_DIR / "minecraft" / "options.txt", settings.lang)
+
+    prism = PRISM_APP if os.access(PRISM_APP, os.X_OK) else shutil.which("prismlauncher")
+    if not prism:
+        err("PrismLauncher не найден — мод уже установлен, запусти игру сам")
+        return
+
+    console.print(Text(f"   ▸ запускаю Prism (инстанс {PRISM_INSTANCE})...", style=GREEN))
+    subprocess.Popen(
+        [str(prism), "--launch", PRISM_INSTANCE],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+# ── меню ────────────────────────────────────────────────────────────────────
+def ask_username(settings: Settings) -> None:
+    value = ask("новый ник", f"[{settings.username}]")
+    if not value:
+        return
+    value = value.strip()
+    if USERNAME_RE.fullmatch(value):
+        settings.username = value
+        ok(f"ник: {settings.username}")
+    else:
+        err("ник: 3-16 символов, только A-Z a-z 0-9 _")
+        time.sleep(1.5)
+
+
+def ask_ram(settings: Settings) -> None:
+    info("2G 1 · 3G 2 · 4G 3 · 6G 4 · 8G 5 · 12G 6 · свой 0")
+    value = ask("выбор")
+    if not value:
+        return
+    options = {"1": "2G", "2": "3G", "3": "4G", "4": "6G", "5": "8G", "6": "12G"}
+    if value in options:
+        settings.ram = options[value]
+    elif value == "0":
+        custom = ask("введи (например 5G или 2048M)")
+        if not custom:
+            return
+        custom = custom.strip()
+        if not RAM_RE.fullmatch(custom):
+            err("формат: 4G / 2048M")
+            time.sleep(1.5)
+            return
+        settings.ram = custom.upper()
+    else:
+        return
+    ok(f"озу: {settings.ram}")
+
+
+def ask_language(settings: Settings) -> None:
+    info("ru_ru 1 · en_us 2 · uk_ua 3 · de_de 4 · fr_fr 5 · es_es 6 · свой 0")
+    value = ask("выбор")
+    if not value:
+        return
+    options = {"1": "ru_ru", "2": "en_us", "3": "uk_ua", "4": "de_de", "5": "fr_fr", "6": "es_es"}
+    if value in options:
+        settings.lang = options[value]
+    elif value == "0":
+        custom = ask("код языка (например pl_pl)")
+        if not custom:
+            return
+        custom = custom.strip()
+        if not LANG_RE.fullmatch(custom):
+            err("формат: xx_yy")
+            time.sleep(1.5)
+            return
+        settings.lang = custom
+    else:
+        return
+    ok(f"язык: {settings.lang}")
+
+
+def menu_loop(settings: Settings) -> None:
+    while True:
+        console.clear()
+        banner()
+        console.print()
+        console.print(settings_line(settings))
+        console.print()
+        console.print(menu_item("1", "Запустить игру", "gradlew runClient · дев-режим, фейк-аккаунт"))
+        console.print(menu_item("2", "Ник"))
+        console.print(menu_item("3", "ОЗУ"))
+        console.print(menu_item("4", "Язык"))
+        console.print(menu_item("5", "Prism + запустить", "реальный аккаунт · для игры на серверах"))
+        console.print(menu_item("0", "Выход"))
+        console.print()
+
+        choice = menu_prompt()
+        if choice is None:
+            return
+        choice = choice.strip()
+
+        if choice == "1":
+            settings.save()
+            run_runclient(settings)
+            pause()
+        elif choice == "2":
+            ask_username(settings)
+            settings.save()
+        elif choice == "3":
+            ask_ram(settings)
+            settings.save()
+        elif choice == "4":
+            ask_language(settings)
+            settings.save()
+        elif choice == "5":
+            settings.save()
+            run_prism(settings)
+            pause()
+        elif choice in ("0", "q", "Q", "exit"):
+            return
+
+
+# ── справка / проверка ──────────────────────────────────────────────────────
+def usage() -> None:
+    banner()
+    console.print()
+    console.print(Text("   Использование:", style="bold white"))
+    commands = [
+        ("./loader", "интерактивное меню"),
+        ("./loader --run", "сразу запустить (настройки из run/loader.conf)"),
+        ("./loader -u Ник -r 6G -l en_us [--run]", ""),
+        ("./loader --prism", "собрать jar и запустить через Prism"),
+        ("./loader --dry", "проверить настройки, ничего не запуская"),
+        ("./loader --help", ""),
+    ]
+    for command, description in commands:
+        line = Text("     ")
+        line.append(command, style=CYAN)
+        if description:
+            line.append("  " + description, style=DIM)
+        console.print(line)
+    console.print()
+    console.print(Text("   Флаги:", style="bold white"))
+    flags = [
+        ("-u, --username <ник>", "игровой ник (3-16 символов: A-Z a-z 0-9 _)"),
+        ("-r, --ram <4G|2048M>", "сколько ОЗУ дать игре"),
+        ("-l, --lang <ru_ru>", "язык игры"),
+        ("--run", "без меню, сразу запуск"),
+        ("--prism", "через PrismLauncher вместо gradlew runClient"),
+    ]
+    for flag, description in flags:
+        line = Text("     ")
+        line.append(flag, style=CYAN)
+        line.append("  " + description, style=DIM)
+        console.print(line)
+
+
+def run_dry(settings: Settings) -> int:
+    if not validate_all(settings):
+        return 1
+    console.clear()
+    banner()
+    console.print()
+    console.print(Text("   ▸ проверка без запуска", style=f"bold {CYAN}"))
+    console.print()
+    console.print(settings_line(settings))
+    console.print()
+    patch_lang(ROOT / "run" / "options.txt", settings.lang)
+    info(f"options.txt: run/options.txt -> lang:{settings.lang}")
+    info(f"команда: ./gradlew runClient -PmcUsername={settings.username} -PmcRam={settings.ram}")
+    console.print()
+    ok("всё ок, запуск не выполнялся")
+    return 0
+
+
+# ── main ────────────────────────────────────────────────────────────────────
+def main(argv: list[str]) -> int:
+    settings = load_settings()
+    mode = "menu"
+
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-u", "--username"):
+            settings.username = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg in ("-r", "--ram"):
+            settings.ram = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg in ("-l", "--lang"):
+            settings.lang = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+        elif arg == "--run":
+            mode = "run"
+            i += 1
+        elif arg == "--prism":
+            mode = "prism"
+            i += 1
+        elif arg in ("--dry", "--check"):
+            mode = "dry"
+            i += 1
+        elif arg in ("-h", "--help"):
+            mode = "help"
+            i += 1
+        else:
+            err(f"неизвестный флаг: {arg}")
+            console.print()
+            usage()
+            return 1
+
+    if mode == "help":
+        usage()
+        return 0
+    if mode == "dry":
+        return run_dry(settings)
+    if mode in ("run", "prism"):
+        if not validate_all(settings):
+            return 1
+        if mode == "run":
+            run_runclient(settings)
+        else:
+            run_prism(settings)
+        return 0
+
+    menu_loop(settings)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        console.print()
+        sys.exit(0)

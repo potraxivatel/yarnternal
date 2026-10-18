@@ -4,6 +4,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.experimental.FieldDefaults;
 import lombok.experimental.NonFinal;
+import net.minecraft.client.gui.DrawContext;
 import yarnternal.lol.api.utility.client.IMinecraft;
 
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
@@ -18,7 +19,9 @@ public class Module implements IMinecraft {
     public void onTick() {
     }
 
-    public void onRender2D() {
+    // context приходит из HUD-колбэка: у MinecraftClient нет геттера DrawContext,
+    // так что без параметра модуль физически не смог бы ничего нарисовать
+    public void onRender2D(DrawContext context) {
     }
 
     public void onRender3D() {
@@ -37,6 +40,7 @@ public class Module implements IMinecraft {
     ModuleList moduleList;
 
     @NonFinal
+    @Getter
     boolean toggled;
 
     public Module() {
@@ -45,16 +49,29 @@ public class Module implements IMinecraft {
             this.name = anno.name();
             this.desc = anno.desc();
             this.moduleList = anno.type();
+        } else {
+            // забыл @ModuleAnnotation — не роняем игру, просто берём имя класса
+            this.name = getClass().getSimpleName();
+            this.desc = "";
+            this.moduleList = ModuleList.Other;
         }
     }
 
-    public void toggle() {
-        this.toggled = !this.toggled;
-        if (this.toggled) {
+    /** Включить/выключить. Повторный вызов с тем же значением ничего не делает. */
+    public void setEnabled(boolean enabled) {
+        if (this.toggled == enabled) {
+            return;
+        }
+        this.toggled = enabled;
+        if (enabled) {
             onEnable();
         } else {
             onDisable();
         }
+    }
+
+    public void toggle() {
+        setEnabled(!this.toggled);
     }
 
 }
