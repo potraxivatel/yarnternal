@@ -1,4 +1,4 @@
-package yarnternal.lol.util;
+package yarnternal.lol.api.utility.math;
 
 import java.util.concurrent.ThreadLocalRandom;
 

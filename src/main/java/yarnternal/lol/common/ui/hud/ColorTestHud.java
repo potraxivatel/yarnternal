@@ -1,10 +1,10 @@
-package yarnternal.lol.hud;
+package yarnternal.lol.common.ui.hud;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
-import yarnternal.lol.util.ColorUtil;
-import yarnternal.lol.util.RenderUtil;
+import yarnternal.lol.api.utility.render.RenderUtil;
+import yarnternal.lol.api.utility.render.color.ColorUtil;
 
 /**
  * Цветной тест — панель, которая каждый кадр рисуется поверх игры.

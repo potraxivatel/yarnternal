@@ -1,4 +1,6 @@
-package yarnternal.lol.util;
+package yarnternal.lol.api.utility.render.color;
+
+import yarnternal.lol.api.utility.math.MathUtil;
 
 /**
  * Color утилита — работа с цветом в формате ARGB (0xAARRGGBB), как в Minecraft.

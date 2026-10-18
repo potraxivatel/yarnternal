@@ -1,7 +1,12 @@
-package yarnternal.lol.util;
+package yarnternal.lol.api.utility.render;
 
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.text.Style;
+import net.minecraft.text.StyleSpriteSource;
+import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
+import yarnternal.lol.api.utility.render.color.ColorUtil;
 
 /**
  * Render утилита — обёртки для рисования в HUD через DrawContext.
@@ -59,8 +64,32 @@ public final class RenderUtil {
         outline(context, x, y, width, height, border);
     }
 
-    /** Рисует текст с тенью. */
+    // ── Шрифты ───────────────────────────────────────────────────────────────
+    // Клиентский шрифт лежит в assets/yarnternal/font/client.json и НЕ трогает
+    // ванильные шрифты игры: он подключается только когда текст рисуют отсюда.
+
+    /** Идентификатор клиентского шрифта (assets/yarnternal/font/client.json). */
+    public static final Identifier CLIENT_FONT_ID = Identifier.of("yarnternal", "client");
+
+    private static final Style CLIENT_FONT_STYLE =
+            Style.EMPTY.withFont(new StyleSpriteSource.Font(CLIENT_FONT_ID));
+
+    /** Рисует текст клиентским шрифтом (с тенью). */
     public static void text(DrawContext context, TextRenderer textRenderer, String text, float x, float y, int color) {
-        context.drawText(textRenderer, text, Math.round(x), Math.round(y), color, true);
+        text(context, textRenderer, text, x, y, color, true);
+    }
+
+    /** Рисует текст клиентским шрифтом. */
+    public static void text(DrawContext context, TextRenderer textRenderer, String text, float x, float y, int color, boolean shadow) {
+        drawText(context, textRenderer, Text.literal(text).setStyle(CLIENT_FONT_STYLE), x, y, color, shadow);
+    }
+
+    /** Рисует текст ванильным шрифтом игры (клиентский шрифт не используется). */
+    public static void textVanilla(DrawContext context, TextRenderer textRenderer, String text, float x, float y, int color, boolean shadow) {
+        drawText(context, textRenderer, Text.literal(text), x, y, color, shadow);
+    }
+
+    private static void drawText(DrawContext context, TextRenderer textRenderer, Text text, float x, float y, int color, boolean shadow) {
+        context.drawText(textRenderer, text, Math.round(x), Math.round(y), color, shadow);
     }
 }
