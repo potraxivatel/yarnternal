@@ -6,6 +6,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import yarnternal.lol.common.modules.other.EventTestModule;
+import yarnternal.lol.common.modules.other.RenderTestModule;
+
 /**
  * Реестр модулей клиента: хранит все модули, отдаёт их по имени/классу
  * и прокидывает хуки тем, что включены.
@@ -21,6 +24,18 @@ public final class ModuleProvider {
     public void init() {
         // register(new KillAura());
         // register(new Sprint());
+
+        // демо-модуль: включён сразу, чтобы в чате было видно, что шина живая.
+        // Появятся настоящие модули — просто удали эти три строки.
+        EventTestModule eventTest = new EventTestModule();
+        register(eventTest);
+        eventTest.setEnabled(true);
+
+        // демо-модуль нового рендера: панель с блюром и скруглениями.
+        // Насмотрелся — удали эти три строки.
+        RenderTestModule renderTest = new RenderTestModule();
+        register(renderTest);
+        renderTest.setEnabled(true);
     }
 
     public void register(Module module) {

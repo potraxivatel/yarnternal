@@ -122,6 +122,13 @@ public final class ColorUtil {
         return hsv((position % 1.0f) * 360.0f, saturation, value, 255);
     }
 
+    /** Поднимает насыщенность цвета (Expensive делает ×1.5 для градиентов). */
+    public static int saturate(int color, float factor) {
+        float[] hsb = java.awt.Color.RGBtoHSB(getRed(color), getGreen(color), getBlue(color), null);
+        float saturation = MathUtil.clamp(hsb[1] * factor, 0.0f, 1.0f);
+        return hsv(hsb[0] * 360.0f, saturation, hsb[2], getAlpha(color));
+    }
+
     /** Затемняет (factor < 1) или осветляет (factor > 1) цвет, прозрачность не трогает. */
     public static int multiply(int color, float factor) {
         return rgba(

@@ -12,6 +12,8 @@ repositories {
 }
 
 loom {
+	accessWidenerPath = file("src/main/resources/yarnternal.accesswidener")
+
 	mods {
 		"yarnternal" {
 			sourceSet sourceSets.main

@@ -1,0 +1,5 @@
+accessWidener	v2	named
+
+# Доступ к билдеру RenderPipeline — свои пайплайны с сырым GLSL (шейдеры рендера).
+accessible	method	com/mojang/blaze3d/pipeline/RenderPipeline$Builder	<init>	()V
+accessible	method	com/mojang/blaze3d/pipeline/RenderPipeline$Builder	withSnippet	(Lcom/mojang/blaze3d/pipeline/RenderPipeline$Snippet;)V

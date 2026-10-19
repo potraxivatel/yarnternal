@@ -131,6 +131,188 @@ public final class RenderUtil {
         text(context, textRenderer, text, x, y, waveColor(x, y));
     }
 
+    // ── Скруглённые прямоугольники ───────────────────────────────────────────
+    // Без шейдеров: дуги собираются из пикселей по формуле окружности
+    // (dx = √(r² − dy²)), а граничные пиксели получают прозрачность по доле
+    // покрытия — маленький AA на CPU, поэтому края выходят гладкими.
+
+    /** Ограничивает радиус: не больше половины меньшей стороны. */
+    private static float clampRadius(float width, float height, float radius) {
+        return Math.max(0.0f, Math.min(radius, Math.min(width, height) / 2.0f));
+    }
+
+    /** Доля пикселя (px, py), попавшая внутрь круга радиуса r с центром (cx, cy). */
+    private static float pixelCoverage(float px, float py, float cx, float cy, float r) {
+        float r2 = r * r;
+
+        // пиксель целиком внутри круга?
+        float farX = Math.max(Math.abs(px - cx), Math.abs(px + 1.0f - cx));
+        float farY = Math.max(Math.abs(py - cy), Math.abs(py + 1.0f - cy));
+        if (farX * farX + farY * farY <= r2) {
+            return 1.0f;
+        }
+
+        // пиксель целиком снаружи?
+        float nearX = Math.max(0.0f, Math.max(px - cx, cx - (px + 1.0f)));
+        float nearY = Math.max(0.0f, Math.max(py - cy, cy - (py + 1.0f)));
+        if (nearX * nearX + nearY * nearY >= r2) {
+            return 0.0f;
+        }
+
+        // граничный пиксель: считаем по подточкам 4×4
+        int samples = 4;
+        int inside = 0;
+        for (int sy = 0; sy < samples; sy++) {
+            for (int sx = 0; sx < samples; sx++) {
+                float sampleX = px + (sx + 0.5f) / samples;
+                float sampleY = py + (sy + 0.5f) / samples;
+                float dx = sampleX - cx;
+                float dy = sampleY - cy;
+                if (dx * dx + dy * dy <= r2) {
+                    inside++;
+                }
+            }
+        }
+        return inside / (float) (samples * samples);
+    }
+
+    /** Цвет с прозрачностью, умноженной на покрытие (для сглаженных краёв). */
+    private static int withCoverage(int color, float coverage) {
+        return ColorUtil.withAlpha(color, Math.round(ColorUtil.getAlpha(color) * coverage));
+    }
+
+    /** Рисует один угол скругления по пикселям: прозрачность — по доле покрытия. */
+    private static void fillCorner(DrawContext context, float cornerX, float cornerY, float centerX, float centerY, float radius, int color) {
+        int size = (int) Math.ceil(radius);
+        for (int j = 0; j < size; j++) {
+            for (int i = 0; i < size; i++) {
+                float px = cornerX + j;
+                float py = cornerY + i;
+                float coverage = pixelCoverage(px, py, centerX, centerY, radius);
+                if (coverage >= 0.99f) {
+                    fill(context, px, py, 1.0f, 1.0f, color);
+                } else if (coverage > 0.02f) {
+                    fill(context, px, py, 1.0f, 1.0f, withCoverage(color, coverage));
+                }
+            }
+        }
+    }
+
+    /** Угол скругления полосой темы: цвет волны в каждом пикселе + прозрачность по покрытию. */
+    private static void waveCorner(DrawContext context, float cornerX, float cornerY, float centerX, float centerY, float radius) {
+        int size = (int) Math.ceil(radius);
+        for (int j = 0; j < size; j++) {
+            for (int i = 0; i < size; i++) {
+                float px = cornerX + j;
+                float py = cornerY + i;
+                float coverage = pixelCoverage(px, py, centerX, centerY, radius);
+                if (coverage > 0.02f) {
+                    int color = waveColor(px, py);
+                    fill(context, px, py, 1.0f, 1.0f, coverage >= 0.99f ? color : withCoverage(color, coverage));
+                }
+            }
+        }
+    }
+
+    /** Угол обводки: покрытие кольца (радиус r минус r−1) — дуга толщиной 1px, но гладкая. */
+    private static void outlineCorner(DrawContext context, float cornerX, float cornerY, float centerX, float centerY, float radius, int color) {
+        int size = (int) Math.ceil(radius);
+        for (int j = 0; j < size; j++) {
+            for (int i = 0; i < size; i++) {
+                float px = cornerX + j;
+                float py = cornerY + i;
+                float coverage = pixelCoverage(px, py, centerX, centerY, radius)
+                        - pixelCoverage(px, py, centerX, centerY, radius - 1.0f);
+                if (coverage > 0.02f) {
+                    fill(context, px, py, 1.0f, 1.0f, withCoverage(color, Math.min(1.0f, coverage)));
+                }
+            }
+        }
+    }
+
+    /** Заливает прямоугольник со скруглёнными углами. */
+    public static void fillRounded(DrawContext context, float x, float y, float width, float height, float radius, int color) {
+        float r = clampRadius(width, height, radius);
+        if (r < 1.0f) {
+            fill(context, x, y, width, height, color);
+            return;
+        }
+
+        // прямые участки: центральный столб и две боковые полосы
+        fill(context, x + r, y, width - 2.0f * r, height, color);
+        fill(context, x, y + r, r, height - 2.0f * r, color);
+        fill(context, x + width - r, y + r, r, height - 2.0f * r, color);
+
+        // углы — сглаженные, по пикселям
+        fillCorner(context, x, y, x + r, y + r, r, color);
+        fillCorner(context, x + width - r, y, x + width - r, y + r, r, color);
+        fillCorner(context, x, y + height - r, x + r, y + height - r, r, color);
+        fillCorner(context, x + width - r, y + height - r, x + width - r, y + height - r, r, color);
+    }
+
+    /** Обводка скруглённого прямоугольника толщиной 1px. */
+    public static void outlineRounded(DrawContext context, float x, float y, float width, float height, float radius, int color) {
+        float r = clampRadius(width, height, radius);
+        if (r < 1.0f) {
+            outline(context, x, y, width, height, color);
+            return;
+        }
+
+        // прямые участки сторон (на 1px внутрь, чтобы сомкнуться с дугами)
+        fill(context, x + r - 1.0f, y, width - 2.0f * r + 2.0f, 1.0f, color);
+        fill(context, x + r - 1.0f, y + height - 1.0f, width - 2.0f * r + 2.0f, 1.0f, color);
+        fill(context, x, y + r - 1.0f, 1.0f, height - 2.0f * r + 2.0f, color);
+        fill(context, x + width - 1.0f, y + r - 1.0f, 1.0f, height - 2.0f * r + 2.0f, color);
+
+        // дуги углов — гладкие, по пикселям
+        outlineCorner(context, x, y, x + r, y + r, r, color);
+        outlineCorner(context, x + width - r, y, x + width - r, y + r, r, color);
+        outlineCorner(context, x, y + height - r, x + r, y + height - r, r, color);
+        outlineCorner(context, x + width - r, y + height - r, x + width - r, y + height - r, r, color);
+    }
+
+    /** Панель со скруглёнными углами: фон + рамка 1px. */
+    public static void panelRounded(DrawContext context, float x, float y, float width, float height, float radius, int background, int border) {
+        fillRounded(context, x, y, width, height, radius, border);
+        fillRounded(context, x + 1.0f, y + 1.0f, width - 2.0f, height - 2.0f, radius - 1.0f, background);
+    }
+
+    /** Заливает скруглённый прямоугольник полосой темы. */
+    public static void fillWaveRounded(DrawContext context, float x, float y, float width, float height, float radius) {
+        float r = clampRadius(width, height, radius);
+        if (r < 1.0f) {
+            fillWave(context, x, y, width, height);
+            return;
+        }
+
+        float step = 4.0f;
+
+        // центральная полоса — во всю высоту
+        for (float offset = r; offset < width - r; offset += step) {
+            float segment = Math.min(step, width - r - offset);
+            fill(context, x + offset, y, segment + 0.5f, height, waveColor(x + offset, y));
+        }
+
+        // боковые полосы — только между углами
+        for (float offset = 0.0f; offset < r; offset += step) {
+            float segment = Math.min(step, r - offset);
+            fill(context, x + offset, y + r, segment + 0.5f, height - 2.0f * r, waveColor(x + offset, y));
+            fill(context, x + width - r + offset, y + r, segment + 0.5f, height - 2.0f * r, waveColor(x + width - r + offset, y));
+        }
+
+        // углы — гладкие, полоса темы по пикселям
+        waveCorner(context, x, y, x + r, y + r, r);
+        waveCorner(context, x + width - r, y, x + width - r, y + r, r);
+        waveCorner(context, x, y + height - r, x + r, y + height - r, r);
+        waveCorner(context, x + width - r, y + height - r, x + width - r, y + height - r, r);
+    }
+
+    /** Панель в стиле со скруглёнными углами: подложка + рамка полосой. alpha — прозрачность подложки (0..255). */
+    public static void panelWaveRounded(DrawContext context, float x, float y, float width, float height, float radius, float alpha) {
+        fillWaveRounded(context, x, y, width, height, radius);
+        fillRounded(context, x + 1.0f, y + 1.0f, width - 2.0f, height - 2.0f, radius - 1.0f, waveBackground(x, alpha));
+    }
+
     // ── Шрифты ───────────────────────────────────────────────────────────────
     // Клиентский шрифт лежит в assets/yarnternal/font/client.json и НЕ трогает
     // ванильные шрифты игры: он подключается только когда текст рисуют отсюда.

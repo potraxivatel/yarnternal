@@ -6,9 +6,19 @@ import lombok.experimental.FieldDefaults;
 import lombok.experimental.NonFinal;
 import net.minecraft.client.gui.DrawContext;
 import yarnternal.lol.api.utility.client.IMinecraft;
+import yarnternal.lol.common.settings.Setting;
+import yarnternal.lol.core.Yarnternal;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class Module implements IMinecraft {
+
+    // настройки модуля: меню рисует их в раскрытой карточке,
+    // ConfigManager сохраняет их в .cfg
+    List<Setting<?>> settings = new ArrayList<>();
 
     public void onEnable() {
     }
@@ -64,9 +74,13 @@ public class Module implements IMinecraft {
         }
         this.toggled = enabled;
         if (enabled) {
+            // подписка на шину событий: @EventTarget-методы модуля оживают
+            Yarnternal.getInstance().getEventManager().register(this);
             onEnable();
         } else {
             onDisable();
+            // снимаем подписки: выключенный модуль молчит до следующего включения
+            Yarnternal.getInstance().getEventManager().unregister(this);
         }
     }
 
@@ -74,4 +88,14 @@ public class Module implements IMinecraft {
         setEnabled(!this.toggled);
     }
 
+    /** Все настройки модуля в порядке добавления. */
+    public List<Setting<?>> getSettings() {
+        return Collections.unmodifiableList(settings);
+    }
+
+    /** Добавляет настройку и возвращает её — удобно для полей модуля. */
+    protected <S extends Setting<?>> S addSetting(S setting) {
+        settings.add(setting);
+        return setting;
+    }
 }

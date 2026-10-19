@@ -6,15 +6,23 @@ import lombok.Getter;
 import lombok.experimental.FieldDefaults;
 import lombok.experimental.NonFinal;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.util.Identifier;
+import yarnternal.lol.api.event.EventManager;
+import yarnternal.lol.api.event.events.TickEvent;
 import yarnternal.lol.api.systems.style.Style;
 import yarnternal.lol.api.systems.style.StyleManager;
 import yarnternal.lol.api.utility.render.color.ColorUtil;
 import yarnternal.lol.common.api.ModuleProvider;
+import yarnternal.lol.common.command.CommandManager;
+import yarnternal.lol.common.config.ConfigManager;
+import yarnternal.lol.common.keybind.KeybindManager;
+import yarnternal.lol.common.ui.gui.ClickGuiManager;
 import yarnternal.lol.common.ui.hud.ColorTestHud;
 import yarnternal.lol.core.provider.ClientInfoProvider;
+import yarnternal.lol.render.RenderBootstrap;
 
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class Yarnternal implements ModInitializer {
@@ -32,6 +40,26 @@ public class Yarnternal implements ModInitializer {
     @NonFinal
     @Getter
     ModuleProvider moduleProvider;
+
+    // создаётся в initManager(): шина событий клиента
+    @NonFinal
+    @Getter
+    EventManager eventManager;
+
+    // создаётся в initManager(): привязки клавиш к модулям
+    @NonFinal
+    @Getter
+    KeybindManager keybindManager;
+
+    // создаётся в initManager(): .cfg-конфиги и масштаб меню
+    @NonFinal
+    @Getter
+    ConfigManager configManager;
+
+    // создаётся в initManager(): клиентские команды с префиксом "."
+    @NonFinal
+    @Getter
+    CommandManager commandManager;
 
     // создаётся в initStyles(): каталог всех тем клиента
     @NonFinal
@@ -67,13 +95,37 @@ public class Yarnternal implements ModInitializer {
         // вот тут будет инит всех менеджерей/демнов и тд типо вот
         // Foks foks = new foks();
 
+        eventManager = new EventManager();
+
+        // клавиши: миксин -> KeyEvent -> бинды модулей
+        keybindManager = new KeybindManager();
+        keybindManager.init();
+
         initStyles();
 
         moduleProvider = new ModuleProvider();
         moduleProvider.init();
 
-        // тик: Fabric зовёт нас 20 раз в секунду -> прокидываем включённым модулям
-        ClientTickEvents.END_CLIENT_TICK.register(client -> moduleProvider.onTick());
+        // конфиги: config/yarnternal/configs/*.cfg + client.json (menu scale)
+        configManager = new ConfigManager();
+
+        // команды: ".help", ".bind", ".modules" и т.д. (перехват чата)
+        commandManager = new CommandManager();
+        commandManager.init();
+
+        // меню клиента: открытие по правому Shift (.menu — то же самое)
+        ClickGuiManager.init();
+
+        // тик: Fabric зовёт нас 20 раз в секунду -> событие подписчикам
+        // и хуки включённым модулям
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            eventManager.call(new TickEvent());
+            moduleProvider.onTick();
+        });
+
+        // рендер-стек (шейдерные скругления, блюр, шрифты) — инициализируем,
+        // когда клиент и GPU уже готовы
+        ClientLifecycleEvents.CLIENT_STARTED.register(client -> RenderBootstrap.init());
     }
 
     /**
@@ -175,11 +227,13 @@ public class Yarnternal implements ModInitializer {
 
     // HUD — регистрируем тут (раньше жило в YarnternalClient, который удалили)
     public void initHud() {
-        HudElementRegistry.addLast(
-                Identifier.of("yarnternal", "color_test"),
-                (context, tickCounter) -> ColorTestHud.render(context));
+        // витрина рендера: подписывается на Render2DEvent и рисует шейдером
+        // (скругления, градиенты, свой шрифт) — см. ColorTestHud
+        eventManager.register(new ColorTestHud());
 
-        // модули рисуют свой HUD поверх всего (addLast = самый верхний слой)
+        // модули рисуют свой HUD поверх всего (addLast = самый верхний слой).
+        // Render2DEvent больше не тут: его постит рендер-хук в конце InGameHud.render,
+        // когда открыт кадр HudRenderer (так подписчики видят и DrawContext, и шейдерный рендер)
         HudElementRegistry.addLast(
                 Identifier.of("yarnternal", "modules"),
                 (context, tickCounter) -> moduleProvider.onRender2D(context));

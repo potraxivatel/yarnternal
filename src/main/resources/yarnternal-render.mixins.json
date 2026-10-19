@@ -1,0 +1,22 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "yarnternal.lol.render.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"mixins": [],
+	"client": [
+		"GameRendererMixin",
+		"GlCommandEncoderMixin",
+		"InGameHudMixin",
+		"ProjectionMatrix2Accessor",
+		"RenderPipelineMixin",
+		"RenderSystemMixin",
+		"ShaderLoaderMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}
