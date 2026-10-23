@@ -83,6 +83,15 @@ processResources {
 	filesMatching("fabric.mod.json") {
 		expand "version": version
 	}
+
+	// data.json и avatar.jpg лежат рядом с ProfileData.java, но должны
+	// попасть в classpath/jar как ресурсы.
+	from("src/main/java") {
+		include "yarnternal/lol/core/data/*.json"
+		include "yarnternal/lol/core/data/*.jpg"
+		include "yarnternal/lol/core/data/*.jpeg"
+		include "yarnternal/lol/core/data/*.png"
+	}
 }
 
 tasks.withType(JavaCompile).configureEach {

@@ -18,6 +18,7 @@ import yarnternal.lol.common.keybind.KeybindManager;
 import yarnternal.lol.common.settings.*;
 import yarnternal.lol.common.ui.Theme;
 import yarnternal.lol.core.Yarnternal;
+import yarnternal.lol.core.data.ProfileData;
 
 import java.util.*;
 
@@ -85,14 +86,16 @@ public final class ClickGuiScreen extends Screen {
         final int y;
         final int w;
         final int h;
+        final int headerH;
         final List<SettingLayout> settings = new ArrayList<>();
 
-        CardLayout(Module module, int x, int y, int w, int h) {
+        CardLayout(Module module, int x, int y, int w, int h, int headerH) {
             this.module = module;
             this.x = x;
             this.y = y;
             this.w = w;
             this.h = h;
+            this.headerH = headerH;
         }
     }
 
@@ -274,36 +277,47 @@ public final class ClickGuiScreen extends Screen {
         int sepY = windowY + H - 35;
         GuiRender.rect(sx + 5, sepY, 90, 0.5, Theme.SIDEBAR_LINE);
 
-        String username = MinecraftClient.getInstance().getSession() != null
-                ? MinecraftClient.getInstance().getSession().getUsername()
-                : "Player";
+        ProfileData profile = ProfileData.get();
+        String username = profile.nickname();
         if (username == null || username.isBlank()) {
             username = "Player";
         }
 
         int avX = sx + 5;
         int avY = sepY + 5;
+
+        // Градиент остаётся подложкой: сквозь скруглённые углы аватарки виден акцент темы.
         GuiRender.rectV(avX, avY, 25, 25,
                 Theme.accent(), Theme.accentAlt(), 5);
 
-        String initial = username.substring(0, 1).toUpperCase();
-        double iw = GuiDrawUtil.textWidth(initial, GuiDrawUtil.BODY_SIZE, GuiRender.Weight.BRAND_BOLD);
-        double ih = GuiDrawUtil.textHeight(GuiDrawUtil.BODY_SIZE, GuiRender.Weight.BRAND_BOLD);
-        GuiDrawUtil.drawText(initial, avX + (25 - iw) / 2, avY + (25 - ih) / 2 - 1,
-                0xFFFFFFFF, GuiDrawUtil.BODY_SIZE, GuiRender.Weight.BRAND_BOLD);
+        var avatarId = ProfileAvatar.texture();
+        if (avatarId != null) {
+            GuiRender.texture(avatarId, avX, avY, 25, 25, 0xFFFFFFFF);
+        } else {
+            String initial = username.substring(0, 1).toUpperCase(Locale.ROOT);
+            double iw = GuiDrawUtil.textWidth(initial, GuiDrawUtil.BODY_SIZE, GuiRender.Weight.BRAND_BOLD);
+            double ih = GuiDrawUtil.textHeight(GuiDrawUtil.BODY_SIZE, GuiRender.Weight.BRAND_BOLD);
+            GuiDrawUtil.drawText(initial, avX + (25 - iw) / 2, avY + (25 - ih) / 2 - 1,
+                    0xFFFFFFFF, GuiDrawUtil.BODY_SIZE, GuiRender.Weight.BRAND_BOLD);
+        }
 
-        String name = GuiDrawUtil.trim(username, 62, GuiDrawUtil.TITLE_SIZE,
+        // Длинный никнейм уменьшаем до комфортного размера, а не режем сразу.
+        double nameSize = GuiDrawUtil.TITLE_SIZE;
+        double nameMax = 61;
+        while (nameSize > GuiDrawUtil.SMALL_SIZE
+                && GuiDrawUtil.textWidth(username, nameSize,
+                GuiRender.Weight.BRAND_BOLD) > nameMax) {
+            nameSize -= 0.25;
+        }
+        String name = GuiDrawUtil.trim(username, nameMax, nameSize,
                 GuiRender.Weight.BRAND_BOLD);
         GuiDrawUtil.drawText(name, sx + 34, avY, Theme.TEXT_WHITE,
-                GuiDrawUtil.TITLE_SIZE, GuiRender.Weight.BRAND_BOLD);
+                nameSize, GuiRender.Weight.BRAND_BOLD);
 
-        var session = MinecraftClient.getInstance().getSession();
-        String uuid = session != null && session.getUuidOrNull() != null
-                ? session.getUuidOrNull().toString().replace("-", "")
-                : "";
-        String uid = uuid.length() >= 8
-                ? uuid.substring(0, 8).toUpperCase(Locale.ROOT)
-                : "LOCAL";
+        String uid = profile.uid();
+        if (uid == null || uid.isBlank()) {
+            uid = "LOCAL";
+        }
         String uidLine = GuiDrawUtil.trim("UID: " + uid, 62, GuiDrawUtil.SMALL_SIZE,
                 GuiRender.Weight.BRAND);
         GuiDrawUtil.drawText(uidLine, sx + 34, avY + 15, Theme.TEXT_LIGHT,
@@ -410,10 +424,10 @@ public final class ClickGuiScreen extends Screen {
             int height = cardHeight(module);
 
             CardLayout card = new CardLayout(module, columnX[column], columnY[column],
-                    Theme.CARD_W, height);
+                    Theme.CARD_W, height, headerHeight(module));
 
             if (!collapsedModules.contains(module)) {
-                int settingY = card.y + Theme.CARD_HEADER_H + Theme.CARD_PAD;
+                int settingY = card.y + card.headerH + Theme.CARD_PAD;
                 for (Setting<?> setting : module.getSettings()) {
                     if (!setting.isVisible()) {
                         continue;
@@ -440,19 +454,30 @@ public final class ClickGuiScreen extends Screen {
     }
 
     private int cardHeight(Module module) {
+        int headerH = headerHeight(module);
         boolean expanded = !collapsedModules.contains(module)
                 && hasVisibleSettings(module);
         if (!expanded) {
-            return Theme.CARD_HEADER_H + Theme.CARD_PAD;
+            return headerH + Theme.CARD_PAD;
         }
 
-        int height = Theme.CARD_HEADER_H + Theme.CARD_PAD * 2;
+        int height = headerH + Theme.CARD_PAD * 2;
         for (Setting<?> setting : module.getSettings()) {
             if (setting.isVisible()) {
                 height += settingHeight(setting);
             }
         }
         return height;
+    }
+
+    private int headerHeight(Module module) {
+        return hasDescription(module)
+                ? Theme.CARD_HEADER_H + Theme.CARD_DESC_H
+                : Theme.CARD_HEADER_H;
+    }
+
+    private boolean hasDescription(Module module) {
+        return module.getDesc() != null && !module.getDesc().isBlank();
     }
 
     private boolean hasVisibleSettings(Module module) {

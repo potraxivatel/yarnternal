@@ -4,6 +4,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.util.Identifier;
 import yarnternal.lol.render.renderer.Fonts;
 import yarnternal.lol.render.renderer.Renderer2D;
 import yarnternal.lol.render.renderer.text.FontFace;
@@ -115,6 +116,16 @@ public final class GuiRender {
     }
 
     // ── Геометрия ────────────────────────────────────────────────────────────
+
+    /** Текстура в GUI-координатах (аватарки и другие готовые изображения). */
+    public static void texture(Identifier id, double x, double y,
+                               double width, double height, int color) {
+        // Текстура рисуется отдельным проходом, поэтому сначала отдаём
+        // накопленный батч, иначе она окажется под уже нарисованным GUI.
+        flush();
+        HudRenderer.INSTANCE.texture(id, x * scale, y * scale,
+                width * scale, height * scale, color(color));
+    }
 
     public static void rect(double x, double y, double width, double height, int color) {
         rect(x, y, width, height, color, 0);

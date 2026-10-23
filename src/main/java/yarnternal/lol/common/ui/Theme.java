@@ -110,6 +110,7 @@ public final class Theme {
     /** Карточки модулей: 160 px, две колонки, как в Expensive 2.0. */
     public static final int CARD_W         = 160;
     public static final int CARD_HEADER_H  = 30;
+    public static final int CARD_DESC_H    = 11;
     /** Нижний отступ внутри карточки после последней настройки. */
     public static final int CARD_PAD       = 6;
     public static final int CARD_GAP       = 8;
