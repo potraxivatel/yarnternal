@@ -8,6 +8,7 @@ import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.Util;
+import yarnternal.lol.api.systems.style.Style;
 import yarnternal.lol.common.api.Module;
 import yarnternal.lol.common.api.ModuleProvider;
 import yarnternal.lol.common.settings.Setting;
@@ -223,10 +224,14 @@ public final class ConfigManager {
         this.menuScale = Math.max(0.5, Math.min(1.5, scale));
     }
 
-    /** Пишет client.json (масштаб меню). false — если файл не записался. */
+    /** Пишет client.json (масштаб меню и активная тема). false — если файл не записался. */
     public boolean saveClient() {
         JsonObject root = new JsonObject();
         root.addProperty("menuScale", menuScale);
+        Yarnternal client = Yarnternal.getInstance();
+        if (client != null && client.getStyle() != null) {
+            root.addProperty("theme", client.getStyle().name());
+        }
         return write(clientFile, GSON.toJson(root));
     }
 
@@ -238,6 +243,16 @@ public final class ConfigManager {
             JsonObject root = JsonParser.parseString(Files.readString(clientFile, StandardCharsets.UTF_8)).getAsJsonObject();
             if (root.has("menuScale")) {
                 setMenuScale(root.get("menuScale").getAsDouble());
+            }
+            if (root.has("theme")) {
+                String themeName = root.get("theme").getAsString();
+                Yarnternal client = Yarnternal.getInstance();
+                if (client != null && client.getStyleManager() != null) {
+                    Style style = client.getStyleManager().getStyleByName(themeName);
+                    if (style != null) {
+                        client.setStyle(style);
+                    }
+                }
             }
         } catch (RuntimeException | IOException ignored) {
             // битый client.json — просто дефолтный масштаб

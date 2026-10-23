@@ -9,8 +9,11 @@ import yarnternal.lol.common.api.Module;
 import yarnternal.lol.common.api.ModuleAnnotation;
 import yarnternal.lol.common.api.ModuleList;
 import yarnternal.lol.common.settings.BooleanSetting;
+import yarnternal.lol.common.settings.ColorSetting;
 import yarnternal.lol.common.settings.EnumSetting;
+import yarnternal.lol.common.settings.MultiBooleanSetting;
 import yarnternal.lol.common.settings.NumberSetting;
+import yarnternal.lol.core.Yarnternal;
 import yarnternal.lol.render.renderer.Renderer2D;
 import yarnternal.lol.render.utils.HudRenderer;
 import yarnternal.lol.render.utils.color.Color;
@@ -43,6 +46,8 @@ public final class RenderTestModule extends Module {
     private final NumberSetting width = addSetting(new NumberSetting("Width", 300, 240, 500, 10, " px"));
     private final EnumSetting<Position> position = addSetting(new EnumSetting<>("Position", Position.TOP_RIGHT));
     private final BooleanSetting blur = addSetting(new BooleanSetting("Blur", true));
+    private final ColorSetting color = addSetting(new ColorSetting("Accent", 0xFF7A5CFF));
+    private final MultiBooleanSetting elements = addSetting(new MultiBooleanSetting("Elements", "Title", "FPS", "Ping", "Time"));
 
     @EventTarget
     private void onRender2D(Render2DEvent event) {
@@ -78,13 +83,17 @@ public final class RenderTestModule extends Module {
                 PANEL_TOP, PANEL_TOP, PANEL_BOTTOM, PANEL_BOTTOM,
                 12 * s, 12 * s, 12 * s, 12 * s, 1.5);
 
-        // 3. Акцентная полоса слева (градиент фиолетовый -> розовый)
+        // 3. Акцентная полоса слева (градиент первой краски -> второй)
+        Yarnternal client = Yarnternal.getInstance();
+        Color accentCol = (client != null && client.getColorOne() != 0) ? toColor(client.getColorOne()) : ACCENT;
+        Color accentAltCol = (client != null && client.getColorTwo() != 0) ? toColor(client.getColorTwo()) : ACCENT_ALT;
+
         Renderer2D.COLOR.roundedQuad(x + 10 * s, y + 12 * s, 3 * s, h - 24 * s,
-                ACCENT_ALT, ACCENT, ACCENT_ALT, ACCENT,
+                accentAltCol, accentCol, accentAltCol, accentCol,
                 1.5 * s, 1.5 * s, 1.5 * s, 1.5 * s, 1.5);
 
         // 4. Текст своим шрифтом (Comfortaa), тень — своя, не ванильная
-        HudRenderer.INSTANCE.text("Yarnternal", x + 24 * s, y + 14 * s, ACCENT, true, 1.0 * s);
+        HudRenderer.INSTANCE.text("Yarnternal", x + 24 * s, y + 14 * s, accentCol, true, 1.0 * s);
         HudRenderer.INSTANCE.text("SDF corners + blur + Comfortaa", x + 24 * s, y + 40 * s, Color.WHITE, false, 0.7 * s);
         HudRenderer.INSTANCE.text("Width: " + width.displayValue() + "   Position: " + position.displayValue(),
                 x + 24 * s, y + 60 * s, TEXT_DIM, false, 0.7 * s);
@@ -110,5 +119,9 @@ public final class RenderTestModule extends Module {
         Renderer2D.TEXTURE.roundedTexQuad(x, y, w, h, 0, u1, v1, u2, v2,
                 Color.WHITE, radius, radius, radius, radius, smoothness);
         Renderer2D.TEXTURE.render(Renderer2D.BLUR.getBlurredTexture(), RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
+    }
+
+    private static Color toColor(int argb) {
+        return new Color((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF, (argb >> 24) & 0xFF);
     }
 }

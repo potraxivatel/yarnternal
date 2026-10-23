@@ -39,6 +39,7 @@ public class MeshRenderer {
     private @Nullable GpuBuffer vertexBuffer;
     private @Nullable GpuBuffer indexBuffer;
     private Matrix4f matrix;
+    private int @Nullable [] scissor;
     private final HashMap<String, GpuBufferSlice> uniforms = new HashMap<>();
     private final HashMap<String, Pair<GpuTextureView, GpuSampler>> samplers = new HashMap<>();
 
@@ -109,6 +110,15 @@ public class MeshRenderer {
         return this.mesh(FullScreenRenderer.vbo, FullScreenRenderer.ibo);
     }
 
+    /**
+     * Ограничивает отрисовку прямоугольником.
+     * Координаты — пиксели фреймбуфера, начало отсчёта в левом верхнем углу.
+     */
+    public MeshRenderer scissor(int x, int y, int width, int height) {
+        this.scissor = new int[] { x, y, width, height };
+        return this;
+    }
+
     public MeshRenderer uniform(String name, GpuBufferSlice slice) {
         uniforms.put(name, slice);
         return this;
@@ -162,6 +172,17 @@ public class MeshRenderer {
                 pass.setPipeline(pipeline);
                 pass.setUniform("MeshData", meshData);
 
+                if (scissor != null) {
+                    // RenderPass ждёт координаты в пикселях фреймбуфера с началом внизу слева
+                    int fbHeight = MinecraftClient.getInstance().getWindow().getFramebufferHeight();
+                    pass.enableScissor(
+                        scissor[0],
+                        fbHeight - (scissor[1] + scissor[3]),
+                        Math.max(0, scissor[2]),
+                        Math.max(0, scissor[3])
+                    );
+                }
+
                 for (var name : uniforms.keySet()) {
                     pass.setUniform(name, uniforms.get(name));
                 }
@@ -190,6 +211,7 @@ public class MeshRenderer {
         vertexBuffer = null;
         indexBuffer = null;
         matrix = null;
+        scissor = null;
         uniforms.clear();
         samplers.clear();
 

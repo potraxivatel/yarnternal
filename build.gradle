@@ -47,6 +47,12 @@ loom {
 		client {
 			programArgs "--username", devUsername
 			vmArgs "-Xmx${devRam}"
+			if (project.hasProperty("debugGui")) {
+				vmArgs "-Dyarnternal.debugGui=true"
+			}
+			if (project.hasProperty("quickWorld")) {
+				programArgs "--quickPlaySingleplayer", project.property("quickWorld").toString()
+			}
 			if (musl) {
 				vmArgs "-Dorg.lwjgl.system.allocator=system"
 			}

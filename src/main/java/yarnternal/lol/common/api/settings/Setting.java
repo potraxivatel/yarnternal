@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Базовая настройка модуля. Настройки живут на модуле, меню рисует их
@@ -20,6 +21,7 @@ public abstract class Setting<T> {
     private final String name;
     protected T value;
     private final List<Consumer<T>> listeners = new ArrayList<>();
+    private Supplier<Boolean> visible = () -> true;
 
     protected Setting(String name, T defaultValue) {
         this.name = name;
@@ -54,6 +56,18 @@ public abstract class Setting<T> {
         if (listener != null) {
             listeners.add(listener);
         }
+    }
+
+    /** Проверяет, видима ли настройка в GUI (для динамических условий видимости). */
+    public boolean isVisible() {
+        return visible == null || visible.get();
+    }
+
+    /** Задаёт условие отображения настройки в GUI (например, visible(() -> mode.getValue() == Mode.Custom)). */
+    @SuppressWarnings("unchecked")
+    public <S extends Setting<?>> S visible(Supplier<Boolean> condition) {
+        this.visible = condition;
+        return (S) this;
     }
 
     /** Хук для наследников самой настройки (не для модулей: они используют onChange). */

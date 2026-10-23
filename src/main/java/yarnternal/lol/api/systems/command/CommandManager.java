@@ -14,6 +14,7 @@ import yarnternal.lol.common.command.impl.BindCommand;
 import yarnternal.lol.common.command.impl.HelpCommand;
 import yarnternal.lol.common.command.impl.MenuCommand;
 import yarnternal.lol.common.command.impl.ModulesCommand;
+import yarnternal.lol.common.command.impl.ThemeCommand;
 import yarnternal.lol.common.command.impl.ToggleCommand;
 import yarnternal.lol.common.command.impl.UnbindCommand;
 
@@ -38,6 +39,7 @@ public final class CommandManager {
         register(new BindCommand());
         register(new UnbindCommand());
         register(new MenuCommand());
+        register(new ThemeCommand());
 
         // ALLOW_CHAT спрашивает "можно ли отправить?"; false = отменить отправку.
         // Возвращаем false именно тогда, когда сообщение оказалось нашей командой.

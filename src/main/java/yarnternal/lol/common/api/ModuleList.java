@@ -6,8 +6,9 @@ public enum ModuleList {
     Render,
     Player,
     Other,
+    Fun,
     Themes,
     Presets,
-    AutoBuy,
-    Fun // тут под вопросом ведь можно ее типо прямо в Other перенести
+    AutoBuy
+    // тут под вопросом ведь можно ее типо прямо в Other перенести
 }

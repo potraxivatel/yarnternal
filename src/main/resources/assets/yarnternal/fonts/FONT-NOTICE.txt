@@ -1,0 +1,21 @@
+GUI fonts
+=========
+
+Montserrat-Light.ttf
+Montserrat-Regular.ttf
+Montserrat-Medium.ttf
+Montserrat-SemiBold.ttf
+Montserrat-Bold.ttf
+    Montserrat is distributed under the SIL Open Font License 1.1.
+    https://scripts.sil.org/OFL
+
+Sora.ttf
+    Sora is distributed under the SIL Open Font License 1.1.
+    https://scripts.sil.org/OFL
+
+Gilroy.ttf
+Gilroy-Bold.ttf
+    Bundled from the user-supplied Expensive source archive for local use only.
+    Gilroy is a commercial typeface; do not redistribute it with public builds.
+
+The layout and colour language of the ClickGUI is inspired by Expensive 2.0.

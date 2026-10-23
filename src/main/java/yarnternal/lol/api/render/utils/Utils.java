@@ -54,6 +54,28 @@ public class Utils {
         rendering3D = true;
     }
 
+    /**
+     * Проекция для отрисовки GUI поверх экрана: пиксели фреймбуфера.
+     * <p>В отличие от {@link #unscaledProjection()} не меняет глобальную
+     * матрицу {@link RenderSystem} — MeshRenderer берёт свою из
+     * {@link RenderUtils#projection}, поэтому ванильный рендер после нас
+     * продолжит работать с прежней проекцией.
+     */
+    public static void guiProjection() {
+        float width = MinecraftClient.getInstance().getWindow().getFramebufferWidth();
+        float height = MinecraftClient.getInstance().getWindow().getFramebufferHeight();
+
+        matrix.set(width, height);
+        RenderUtils.projection.set(((ProjectionMatrix2Accessor) matrix).yarn$callGetMatrix(width, height));
+
+        rendering3D = false;
+    }
+
+    /** Возвращает флаг мировых координат после {@link #guiProjection()}. */
+    public static void endGuiProjection() {
+        rendering3D = true;
+    }
+
     public static byte[] readBytes(InputStream in) {
         try {
             return in.readAllBytes();

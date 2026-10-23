@@ -8,10 +8,9 @@ import com.google.common.cache.LoadingCache;
 import yarnternal.lol.render.renderer.*;
 import yarnternal.lol.render.renderer.text.CustomTextRenderer;
 import yarnternal.lol.render.renderer.text.Font;
+import yarnternal.lol.render.renderer.text.FontFace;
 import yarnternal.lol.render.utils.color.Color;
 import yarnternal.lol.render.utils.render.RenderUtils;
-import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.render.entity.state.LivingEntityRenderState;
 import net.minecraft.entity.LivingEntity;
@@ -24,8 +23,10 @@ import org.lwjgl.BufferUtils;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 
 public class HudRenderer {
@@ -35,18 +36,24 @@ public class HudRenderer {
 
     private final List<Runnable> postTasks = new ArrayList<>();
 
-    private final Int2ObjectMap<FontHolder> fontsInUse = new Int2ObjectOpenHashMap<>();
-    private final LoadingCache<Integer, FontHolder> fontCache = CacheBuilder.newBuilder()
-            .maximumSize(4)
+    /** Ключ кэша: шрифт + высота растеризации. */
+    private record FontKey(FontFace face, int height) {}
+
+    private final Map<FontKey, FontHolder> fontsInUse = new HashMap<>();
+    private final LoadingCache<FontKey, FontHolder> fontCache = CacheBuilder.newBuilder()
+            .maximumSize(24)
             .expireAfterAccess(Duration.ofMinutes(10))
             .removalListener(notification -> {
                 if (notification.wasEvicted())
                     ((FontHolder) notification.getValue()).destroy();
             })
-            .build(CacheLoader.from(HudRenderer::loadFont));
+            .build(CacheLoader.from(key -> loadFont(key.face(), key.height())));
 
     public DrawContext drawContext;
     public double delta;
+
+    private boolean scissorEnabled;
+    private int scissorX, scissorY, scissorWidth, scissorHeight;
 
     private HudRenderer() {
     }
@@ -60,28 +67,19 @@ public class HudRenderer {
         drawContext.createNewRootLayer();
     }
 
+    /**
+     * Сбрасывает накопленную геометрию и текст на экран, не закрывая кадр.
+     * Нужно перед сменой ножниц — батч рисуется одним проходом.
+     */
+    public void flush() {
+        Renderer2D.COLOR.render();
+        renderFonts();
+        Renderer2D.COLOR.begin();
+    }
+
     public void end() {
         Renderer2D.COLOR.render();
-
-        // Render fonts that were visited this frame and move to cache which weren't visited
-        for (Iterator<FontHolder> it = fontsInUse.values().iterator(); it.hasNext(); ) {
-            FontHolder fontHolder = it.next();
-
-            if (fontHolder.visited) {
-                MeshRenderer.begin()
-                        .attachments(MinecraftClient.getInstance().getFramebuffer())
-                        .pipeline(YarnRenderPipelines.UI_TEXT)
-                        .mesh(fontHolder.getMesh())
-                        .sampler("u_Texture", fontHolder.font.texture.getGlTextureView(), fontHolder.font.texture.getSampler())
-                        .end();
-            }
-            else {
-                it.remove();
-                fontCache.put(fontHolder.font.getHeight(), fontHolder);
-            }
-
-            fontHolder.visited = false;
-        }
+        renderFonts();
 
         for (Runnable task : postTasks) task.run();
         postTasks.clear();
@@ -89,6 +87,48 @@ public class HudRenderer {
         drawContext.createNewRootLayer();
 
         drawContext = null;
+    }
+
+    /** Ограничивает отрисовку прямоугольником (пиксели фреймбуфера, левый верхний угол). */
+    public void scissor(int x, int y, int width, int height) {
+        scissorEnabled = true;
+        scissorX = x;
+        scissorY = y;
+        scissorWidth = width;
+        scissorHeight = height;
+        Renderer2D.COLOR.setScissor(x, y, width, height);
+    }
+
+    public void resetScissor() {
+        scissorEnabled = false;
+        Renderer2D.COLOR.clearScissor();
+    }
+
+    private void renderFonts() {
+        // Render fonts that were visited this frame and move to cache which weren't visited
+        for (Iterator<FontHolder> it = fontsInUse.values().iterator(); it.hasNext(); ) {
+            FontHolder fontHolder = it.next();
+
+            if (fontHolder.visited) {
+                MeshRenderer renderer = MeshRenderer.begin()
+                        .attachments(MinecraftClient.getInstance().getFramebuffer())
+                        .pipeline(YarnRenderPipelines.UI_TEXT)
+                        .mesh(fontHolder.getMesh())
+                        .sampler("u_Texture", fontHolder.font.texture.getGlTextureView(), fontHolder.font.texture.getSampler());
+
+                if (scissorEnabled) {
+                    renderer.scissor(scissorX, scissorY, scissorWidth, scissorHeight);
+                }
+
+                renderer.end();
+            }
+            else {
+                it.remove();
+                fontCache.put(new FontKey(fontHolder.face, fontHolder.font.getHeight()), fontHolder);
+            }
+
+            fontHolder.visited = false;
+        }
     }
 
     public void line(double x1, double y1, double x2, double y2, Color color) {
@@ -114,7 +154,11 @@ public class HudRenderer {
     }
 
     public double text(String text, double x, double y, Color color, boolean shadow, double scale) {
-        FontHolder fontHolder = getFontHolder(scale, true);
+        return text(text, x, y, color, shadow, scale, Fonts.FONT);
+    }
+
+    public double text(String text, double x, double y, Color color, boolean shadow, double scale, FontFace face) {
+        FontHolder fontHolder = getFontHolder(face, scale, true);
 
         Font font = fontHolder.font;
         MeshBuilder mesh = fontHolder.getMesh();
@@ -125,46 +169,56 @@ public class HudRenderer {
             int preShadowA = CustomTextRenderer.SHADOW_COLOR.a;
             CustomTextRenderer.SHADOW_COLOR.a = (int) (color.a / 255.0 * preShadowA);
 
-            width = font.render(mesh, text, x + 1, y + 1, CustomTextRenderer.SHADOW_COLOR, scale);
-            font.render(mesh, text, x, y, color, scale);
+            width = font.render(mesh, text, x + 1, y + 1, CustomTextRenderer.SHADOW_COLOR, 1.0);
+            font.render(mesh, text, x, y, color, 1.0);
 
             CustomTextRenderer.SHADOW_COLOR.a = preShadowA;
         }
         else {
-            width = font.render(mesh, text, x, y, color, scale);
+            width = font.render(mesh, text, x, y, color, 1.0);
         }
 
         return width;
     }
     public double text(String text, double x, double y, Color color, boolean shadow) {
-        return text(text, x, y, color, shadow, -1);
+        return text(text, x, y, color, shadow, 1.0);
     }
 
     public double textWidth(String text, boolean shadow, double scale) {
+        return textWidth(text, shadow, scale, Fonts.FONT);
+    }
+
+    public double textWidth(String text, boolean shadow, double scale, FontFace face) {
         if (text.isEmpty()) return 0;
 
-        double width = getFont(scale).getWidth(text, text.length());
-        return (width + (shadow ? 1 : 0)) * scale + (shadow ? 1 : 0);
+        double width = getFont(face, scale).getWidth(text, text.length());
+        return width + (shadow ? 1 : 0);
     }
+
     public double textWidth(String text, boolean shadow) {
-        return textWidth(text, shadow, -1);
+        return textWidth(text, shadow, 1.0);
     }
     public double textWidth(String text, double scale) {
         return textWidth(text, false, scale);
     }
     public double textWidth(String text) {
-        return textWidth(text, false, -1);
+        return textWidth(text, false, 1.0);
     }
 
     public double textHeight(boolean shadow, double scale) {
-        double height = getFont(scale).getHeight() + 1;
-        return (height + (shadow ? 1 : 0)) * scale;
+        return textHeight(shadow, scale, Fonts.FONT);
     }
+
+    public double textHeight(boolean shadow, double scale, FontFace face) {
+        double height = getFont(face, scale).getHeight() + 1;
+        return height + (shadow ? 1 : 0);
+    }
+
     public double textHeight(boolean shadow) {
-        return textHeight(shadow, -1);
+        return textHeight(shadow, 1.0);
     }
     public double textHeight() {
-        return textHeight(false, -1);
+        return textHeight(false, 1.0);
     }
 
     public void post(Runnable task) {
@@ -215,11 +269,12 @@ public class HudRenderer {
         drawContext.addEntity(state, scale, translation, rotation, null, x1, y1, x2, y2);
     }
 
-    private FontHolder getFontHolder(double scale, boolean render) {
+    private FontHolder getFontHolder(FontFace face, double scale, boolean render) {
         int height = (int) Math.round(scale / SCALE_TO_HEIGHT);
+        FontKey key = new FontKey(face, height);
 
         // Check fonts in use
-        FontHolder fontHolder = fontsInUse.get(height);
+        FontHolder fontHolder = fontsInUse.get(key);
         if (fontHolder != null) {
             if (render) fontHolder.visited = true;
             return fontHolder;
@@ -227,38 +282,40 @@ public class HudRenderer {
 
         // Create font if not in cache otherwise remove from cache and add to fonts in use
         if (render) {
-            fontHolder = fontCache.getIfPresent(height);
-            if (fontHolder == null) fontHolder = loadFont(height);
-            else fontCache.invalidate(height);
+            fontHolder = fontCache.getIfPresent(key);
+            if (fontHolder == null) fontHolder = loadFont(face, height);
+            else fontCache.invalidate(key);
 
-            fontsInUse.put(height, fontHolder);
+            fontsInUse.put(key, fontHolder);
             fontHolder.visited = true;
 
             return fontHolder;
         }
 
         // Otherwise get from cache
-        return fontCache.getUnchecked(height);
+        return fontCache.getUnchecked(key);
     }
 
-    private Font getFont(double scale) {
-        return getFontHolder(scale, false).font;
+    private Font getFont(FontFace face, double scale) {
+        return getFontHolder(face, scale, false).font;
     }
 
-    private static FontHolder loadFont(int height) {
-        byte[] data = Utils.readBytes(Fonts.RENDERER.fontFace.toStream());
+    private static FontHolder loadFont(FontFace face, int height) {
+        byte[] data = Utils.readBytes(face.toStream());
         ByteBuffer buffer = BufferUtils.createByteBuffer(data.length).put(data).flip();
 
-        return new FontHolder(new Font(buffer, height));
+        return new FontHolder(face, new Font(buffer, height));
     }
 
     private static class FontHolder {
+        public final FontFace face;
         public final Font font;
         public boolean visited;
 
         private MeshBuilder mesh;
 
-        public FontHolder(Font font) {
+        public FontHolder(FontFace face, Font font) {
+            this.face = face;
             this.font = font;
         }
 

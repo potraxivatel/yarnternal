@@ -4,6 +4,7 @@ import net.minecraft.client.MinecraftClient;
 import yarnternal.lol.api.event.EventTarget;
 import yarnternal.lol.api.event.events.Render2DEvent;
 import yarnternal.lol.api.utility.render.color.ColorUtil;
+import yarnternal.lol.core.Yarnternal;
 import yarnternal.lol.render.renderer.Renderer2D;
 import yarnternal.lol.render.utils.HudRenderer;
 import yarnternal.lol.render.utils.color.Color;
@@ -129,9 +130,9 @@ public final class ColorTestHud {
         double sy = y + 120 * s;
         double sh = 14 * s;
 
-        Renderer2D.COLOR.roundedQuad(ix, sy, sh, sh, argb(THEME_ONE), 7 * s, 1.5);
+        Renderer2D.COLOR.roundedQuad(ix, sy, sh, sh, argb(themeOne()), 7 * s, 1.5);
         Renderer2D.COLOR.roundedQuad(ix + 22 * s, sy, 40 * s, sh,
-                argb(THEME_ONE), argb(THEME_TWO), argb(THEME_TWO), argb(THEME_ONE),
+                argb(themeOne()), argb(themeTwo()), argb(themeTwo()), argb(themeOne()),
                 7 * s, 7 * s, 7 * s, 7 * s, 1.5);
         Renderer2D.COLOR.roundedQuad(ix + 66 * s, sy, 24 * s, sh,
                 argb(ColorUtil.rgb(85, 255, 85)), 2 * s, 1.5);
@@ -166,8 +167,18 @@ public final class ColorTestHud {
         }
     }
 
+    private static int themeOne() {
+        Yarnternal y = Yarnternal.getInstance();
+        return y != null && y.getColorOne() != 0 ? y.getColorOne() : THEME_ONE;
+    }
+
+    private static int themeTwo() {
+        Yarnternal y = Yarnternal.getInstance();
+        return y != null && y.getColorTwo() != 0 ? y.getColorTwo() : THEME_TWO;
+    }
+
     private static Color wave(double phase) {
-        return argb(ColorUtil.wave(THEME_ONE, THEME_TWO, (float) phase));
+        return argb(ColorUtil.wave(themeOne(), themeTwo(), (float) phase));
     }
 
     private static Color argb(int color) {

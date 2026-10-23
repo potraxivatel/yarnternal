@@ -23,7 +23,7 @@ public final class ModuleProvider {
      */
     public void init() {
         // register(new KillAura());
-        // register(new Sprint());
+        register(new yarnternal.lol.common.impl.movement.Sprint());
 
         // демо-модуль: включён сразу, чтобы в чате было видно, что шина живая.
         // Появятся настоящие модули — просто удали эти три строки.

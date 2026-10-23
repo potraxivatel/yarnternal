@@ -1,5 +1,6 @@
 package yarnternal.lol.render.mixin;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.hud.InGameHud;
 import net.minecraft.client.render.RenderTickCounter;
@@ -22,6 +23,11 @@ public abstract class InGameHudMixin {
 
     @Inject(method = "render", at = @At("TAIL"))
     private void yarn$render2D(DrawContext context, RenderTickCounter tickCounter, CallbackInfo ci) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.options.hudHidden) {
+            return;
+        }
+
         Utils.updateFrameTime();
 
         context.createNewRootLayer();

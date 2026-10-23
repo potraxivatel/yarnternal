@@ -1,6 +1,7 @@
 package yarnternal.lol.render.renderer;
 
 import yarnternal.lol.render.RenderLog;
+import yarnternal.lol.render.renderer.text.BuiltinFontFace;
 import yarnternal.lol.render.renderer.text.CustomTextRenderer;
 import yarnternal.lol.render.renderer.text.FontFace;
 import yarnternal.lol.render.renderer.text.FontFamily;
@@ -21,6 +22,20 @@ public final class Fonts {
 
     public static CustomTextRenderer RENDERER;
     public static FontFace FONT;
+
+    /** Montserrat для GUI: от лёгкого до жирного. */
+    public static FontFace GUI_LIGHT;
+    public static FontFace GUI_REGULAR;
+    public static FontFace GUI_MEDIUM;
+    public static FontFace GUI_SEMIBOLD;
+    public static FontFace GUI_BOLD;
+
+    /** Sora — заголовки категорий. */
+    public static FontFace GUI_CATEGORY;
+
+    /** Gilroy — логотип и профиль. */
+    public static FontFace GUI_BRAND;
+    public static FontFace GUI_BRAND_BOLD;
 
     private Fonts() {
     }
@@ -49,11 +64,34 @@ public final class Fonts {
 
         RENDERER = new CustomTextRenderer(FONT);
 
+        GUI_LIGHT = loadGuiFace("Montserrat-Light");
+        GUI_REGULAR = loadGuiFace("Montserrat-Regular");
+        GUI_MEDIUM = loadGuiFace("Montserrat-Medium");
+        GUI_SEMIBOLD = loadGuiFace("Montserrat-SemiBold");
+        GUI_BOLD = loadGuiFace("Montserrat-Bold");
+
+        GUI_CATEGORY = loadGuiFace("Sora");
+        GUI_BRAND = loadGuiFace("Gilroy");
+        GUI_BRAND_BOLD = loadGuiFace("Gilroy-Bold");
+
         RenderLog.LOG.info(
                 "Loaded font: {} ({})",
                 family.getName(),
                 FontInfo.Type.Regular
         );
+        RenderLog.LOG.info(
+                "GUI fonts: regular={} | semibold={} | category={} | brand={}",
+                GUI_REGULAR, GUI_SEMIBOLD, GUI_CATEGORY, GUI_BRAND_BOLD
+        );
+    }
+
+    private static FontFace loadGuiFace(String name) {
+        FontInfo info = FontUtils.getBuiltinFontInfo(name);
+        if (info == null) {
+            RenderLog.LOG.warn("Failed to load GUI font {}, falling back to {}", name, FONT);
+            return FONT;
+        }
+        return new BuiltinFontFace(info, name);
     }
 
     public static CustomTextRenderer get() {

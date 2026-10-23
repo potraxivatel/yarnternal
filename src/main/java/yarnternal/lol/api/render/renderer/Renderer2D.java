@@ -23,6 +23,9 @@ public class Renderer2D {
     public final MeshBuilder triangles;
     public final MeshBuilder lines;
 
+    private boolean scissorEnabled;
+    private int scissorX, scissorY, scissorWidth, scissorHeight;
+
     public Renderer2D(boolean textured) {
         this.textured = textured;
 
@@ -39,6 +42,26 @@ public class Renderer2D {
 
     public void setAlpha(double alpha) {
         triangles.alpha = alpha;
+    }
+
+    /** Ограничивает всё, что рисуется дальше, прямоугольником (пиксели фреймбуфера). */
+    public void setScissor(int x, int y, int width, int height) {
+        scissorEnabled = true;
+        scissorX = x;
+        scissorY = y;
+        scissorWidth = width;
+        scissorHeight = height;
+    }
+
+    public void clearScissor() {
+        scissorEnabled = false;
+    }
+
+    private MeshRenderer applyScissor(MeshRenderer renderer) {
+        if (scissorEnabled) {
+            renderer.scissor(scissorX, scissorY, scissorWidth, scissorHeight);
+        }
+        return renderer;
     }
 
     public void begin() {
@@ -66,18 +89,18 @@ public class Renderer2D {
         if (lines.isBuilding()) lines.end();
         if (triangles.isBuilding()) triangles.end();
 
-        MeshRenderer.begin()
+        MeshRenderer lineRenderer = MeshRenderer.begin()
             .attachments(MinecraftClient.getInstance().getFramebuffer())
             .pipeline(YarnRenderPipelines.UI_COLORED_LINES)
-            .mesh(lines)
-            .end();
+            .mesh(lines);
+        applyScissor(lineRenderer).end();
 
-        MeshRenderer.begin()
+        MeshRenderer triangleRenderer = MeshRenderer.begin()
             .attachments(MinecraftClient.getInstance().getFramebuffer())
             .pipeline(textured ? YarnRenderPipelines.UI_TEXTURED : YarnRenderPipelines.UI_COLORED)
             .mesh(triangles)
-            .sampler(samplerName, samplerView, sampler)
-            .end();
+            .sampler(samplerName, samplerView, sampler);
+        applyScissor(triangleRenderer).end();
     }
 
     // Tris

@@ -9,6 +9,7 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.Identifier;
 import yarnternal.lol.api.event.EventManager;
 import yarnternal.lol.api.event.events.TickEvent;
@@ -236,7 +237,12 @@ public class Yarnternal implements ModInitializer {
         // когда открыт кадр HudRenderer (так подписчики видят и DrawContext, и шейдерный рендер)
         HudElementRegistry.addLast(
                 Identifier.of("yarnternal", "modules"),
-                (context, tickCounter) -> moduleProvider.onRender2D(context));
+                (context, tickCounter) -> {
+                    if (MinecraftClient.getInstance().options.hudHidden) {
+                        return;
+                    }
+                    moduleProvider.onRender2D(context);
+                });
     }
 
     // загрузчик
