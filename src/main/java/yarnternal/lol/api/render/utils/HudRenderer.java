@@ -148,9 +148,23 @@ public class HudRenderer {
     }
 
     public void texture(Identifier id, double x, double y, double width, double height, Color color) {
+        texture(id, x, y, width, height, 0.0, color);
+    }
+
+    public void texture(Identifier id, double x, double y, double width, double height, double rotation, Color color) {
+        var tm = MinecraftClient.getInstance().getTextureManager();
+        var tex = tm.getTexture(id);
+        if (tex == null) {
+            tm.registerTexture(id);
+            tex = tm.getTexture(id);
+        }
+        if (tex == null) {
+            return;
+        }
+
         Renderer2D.TEXTURE.begin();
-        Renderer2D.TEXTURE.texQuad(x, y, width, height, color);
-        Renderer2D.TEXTURE.render(MinecraftClient.getInstance().getTextureManager().getTexture(id).getGlTextureView(), MinecraftClient.getInstance().getTextureManager().getTexture(id).getSampler());
+        Renderer2D.TEXTURE.texQuad(x, y, width, height, rotation, color);
+        Renderer2D.TEXTURE.render(tex.getGlTextureView(), tex.getSampler());
     }
 
     public double text(String text, double x, double y, Color color, boolean shadow, double scale) {

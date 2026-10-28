@@ -1,0 +1,173 @@
+package yarnternal.lol.common.impl.combat;
+
+import net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.ExplosionS2CPacket;
+import net.minecraft.util.math.Vec3d;
+import yarnternal.lol.common.api.Module;
+import yarnternal.lol.common.api.ModuleAnnotation;
+import yarnternal.lol.common.api.ModuleList;
+import yarnternal.lol.common.settings.BooleanSetting;
+import yarnternal.lol.common.settings.ModeSetting;
+import yarnternal.lol.common.settings.NumberSetting;
+
+/**
+ * Velocity — уменьшает или полностью убирает отдачу от ударов, взрывов и снарядов.
+ * <ul>
+ *   <li><b>Cancel</b> — 100% отмена входящих пакетов отталкивания (для ванилы / анархий).</li>
+ *   <li><b>Custom</b> — гибкая настройка множителей горизонтальной и вертикальной отдачи (0–100%).</li>
+ *   <li><b>JumpReset</b> — легитный обход GrimAC / Matrix через микро-прыжок в тик получения урона.</li>
+ * </ul>
+ */
+@ModuleAnnotation(name = "Velocity", desc = "Уменьшает или полностью убирает отдачу", type = ModuleList.Combat)
+public class Velocity extends Module {
+
+    private final ModeSetting mode = addSetting(
+            new ModeSetting("Mode", "Cancel", "Cancel", "Custom", "JumpReset")
+    );
+
+    // ── Custom mode settings ───────────────────────────────────────────
+    private final NumberSetting horizontal = addSetting(
+            new NumberSetting("Horizontal", 0.0, 0.0, 100.0, 1.0, "%").visible(() -> mode.is("Custom"))
+    );
+    private final NumberSetting vertical = addSetting(
+            new NumberSetting("Vertical", 0.0, 0.0, 100.0, 1.0, "%").visible(() -> mode.is("Custom"))
+    );
+
+    // ── JumpReset mode settings ────────────────────────────────────────
+    private final NumberSetting chance = addSetting(
+            new NumberSetting("Chance", 100.0, 0.0, 100.0, 1.0, "%").visible(() -> mode.is("JumpReset"))
+    );
+    private final BooleanSetting onlyMoving = addSetting(
+            new BooleanSetting("Only Moving", false).visible(() -> mode.is("JumpReset"))
+    );
+    private final BooleanSetting onGround = addSetting(
+            new BooleanSetting("On Ground", true).visible(() -> mode.is("JumpReset"))
+    );
+
+    // ── Explosion setting ──────────────────────────────────────────────
+    private final BooleanSetting explosions = addSetting(
+            new BooleanSetting("Explosions", true).visible(() -> !mode.is("JumpReset"))
+    );
+
+    @Override
+    public void onTick() {
+        if (mc.player == null || mc.world == null) return;
+        if (!isToggled()) return;
+
+        if (mode.is("JumpReset")) {
+            handleJumpReset();
+        }
+    }
+
+    /**
+     * JumpReset — полностью легитный обход современных античитов (GrimAC, Matrix, Vulcan).
+     * Прыжок в первый тик после получения урона (hurtTime == 9) сбивает горизонтальную отдачу
+     * стандартной физикой игры без расхождений в серверной симуляции.
+     */
+    private void handleJumpReset() {
+        if (mc.player == null) return;
+
+        if (mc.player.hurtTime == 9) {
+            if (!onGround.getValue() || mc.player.isOnGround()) {
+                if (!onlyMoving.getValue() || isMoving()) {
+                    if (chance.getValue() >= 100.0 || Math.random() * 100.0 <= chance.getValue()) {
+                        mc.player.jump();
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Обработка пакета отталкивания сущности (EntityVelocityUpdateS2CPacket).
+     * @return true, если пакет должен быть отменён mixin'ом.
+     */
+    public boolean handleVelocity(EntityVelocityUpdateS2CPacket packet) {
+        if (!isToggled() || mc.player == null) return false;
+
+        if (mode.is("JumpReset")) {
+            // Для JumpReset оставляем пакет в оригинальном виде, чтобы GrimAC не выдавал флаг несовпадения
+            return false;
+        }
+
+        if (mode.is("Cancel")) {
+            return true;
+        }
+
+        if (mode.is("Custom")) {
+            double h = horizontal.getValue() / 100.0;
+            double v = vertical.getValue() / 100.0;
+
+            if (h == 0.0 && v == 0.0) {
+                return true;
+            }
+
+            Vec3d original = packet.getVelocity();
+            Vec3d scaled = new Vec3d(original.x * h, original.y * v, original.z * h);
+
+            if (mc.isOnThread()) {
+                mc.player.setVelocityClient(scaled);
+            } else {
+                mc.execute(() -> {
+                    if (mc.player != null) {
+                        mc.player.setVelocityClient(scaled);
+                    }
+                });
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Обработка взрывного отталкивания (ExplosionS2CPacket).
+     * @return true, если отталкивание от взрыва должно быть отменено mixin'ом.
+     */
+    public boolean handleExplosion(ExplosionS2CPacket packet) {
+        if (!isToggled() || !explosions.getValue() || mc.player == null || mode.is("JumpReset")) {
+            return false;
+        }
+
+        if (mode.is("Cancel")) {
+            return true;
+        }
+
+        if (mode.is("Custom")) {
+            double h = horizontal.getValue() / 100.0;
+            double v = vertical.getValue() / 100.0;
+
+            if (h == 0.0 && v == 0.0) {
+                return true;
+            }
+
+            packet.playerKnockback().ifPresent(kb -> {
+                Vec3d scaled = new Vec3d(kb.x * h, kb.y * v, kb.z * h);
+                if (mc.isOnThread()) {
+                    mc.player.addVelocityInternal(scaled);
+                } else {
+                    mc.execute(() -> {
+                        if (mc.player != null) {
+                            mc.player.addVelocityInternal(scaled);
+                        }
+                    });
+                }
+            });
+            return true;
+        }
+
+        return false;
+    }
+
+    private boolean isMoving() {
+        if (mc.player == null) return false;
+        return mc.options.forwardKey.isPressed()
+                || mc.options.backKey.isPressed()
+                || mc.options.leftKey.isPressed()
+                || mc.options.rightKey.isPressed();
+    }
+
+    public String getMode() {
+        return mode.get();
+    }
+}

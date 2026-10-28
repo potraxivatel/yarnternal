@@ -334,7 +334,7 @@ def run_runclient(settings: Settings) -> None:
         subprocess.run(
             ["./gradlew", "runClient",
              f"-PmcUsername={settings.username}", f"-PmcRam={settings.ram}",
-             "--console=plain"],
+             "--console=plain", "--offline"],
             check=False,
         )
     except KeyboardInterrupt:
@@ -351,7 +351,7 @@ def run_prism(settings: Settings) -> None:
         return
 
     console.print(Text("   ▸ собираю мод...", style=GREEN))
-    build = subprocess.run(["./gradlew", "build", "--console=plain", "-q"], check=False)
+    build = subprocess.run(["./gradlew", "build", "--console=plain", "-q", "--offline"], check=False)
     if build.returncode != 0:
         err("сборка упала — смотри вывод gradle выше")
         return

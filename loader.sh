@@ -150,7 +150,7 @@ run_runclient() {
     fi
     echo
     printf '   %s▸ ЗАПУСКАЮ YARNNTERNAL...%s\n\n' "$GREEN$BOLD" "$RESET"
-    ./gradlew runClient -PmcUsername="$USERNAME" -PmcRam="$RAM" --console=plain
+    ./gradlew runClient -PmcUsername="$USERNAME" -PmcRam="$RAM" --console=plain --offline
     echo
     ok "игра закрыта"
 }
@@ -159,7 +159,7 @@ run_runclient() {
 run_prism() {
     setup_java
     printf '   %s▸ собираю мод...%s\n' "$GREEN" "$RESET"
-    ./gradlew build --console=plain -q
+    ./gradlew build --console=plain -q --offline
 
     local jar
     jar="$(ls build/libs/yarnternal-*.jar 2>/dev/null | grep -vE 'sources|dev' | head -n1 || true)"

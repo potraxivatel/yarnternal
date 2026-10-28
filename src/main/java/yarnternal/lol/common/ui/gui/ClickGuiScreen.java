@@ -58,6 +58,10 @@ public final class ClickGuiScreen extends Screen {
     private boolean collapsedDefaultsApplied;
     private final long openedAt = System.nanoTime();
 
+    private float descAnim = 0f;
+    private Module currentHoveredModule = null;
+    private Module lastHoveredModule = null;
+
     private NumberSetting draggingSlider = null;
     private double dragSliderX;
     private double dragSliderW;
@@ -86,16 +90,14 @@ public final class ClickGuiScreen extends Screen {
         final int y;
         final int w;
         final int h;
-        final int headerH;
         final List<SettingLayout> settings = new ArrayList<>();
 
-        CardLayout(Module module, int x, int y, int w, int h, int headerH) {
+        CardLayout(Module module, int x, int y, int w, int h) {
             this.module = module;
             this.x = x;
             this.y = y;
             this.w = w;
             this.h = h;
-            this.headerH = headerH;
         }
     }
 
@@ -206,6 +208,9 @@ public final class ClickGuiScreen extends Screen {
 
         // 5. Бренд в шапке сайдбара — цветом активной темы.
         renderBrand();
+
+        // 6. Всплывающее описание по центру над окном.
+        renderFloatingDescription();
 
         GuiRender.setAlpha(1f);
         GuiRender.end();
@@ -346,6 +351,19 @@ public final class ClickGuiScreen extends Screen {
         int cw = W - Theme.SIDEBAR_W;
         int ch = H;
 
+        currentHoveredModule = null;
+        if (selectedCategory != ModuleList.Themes || !searchQuery.trim().isEmpty()) {
+            List<CardLayout> cards = buildCardLayouts(cx, cy, cw);
+            for (CardLayout card : cards) {
+                if (mouseX >= card.x && mouseX < card.x + card.w
+                        && mouseY >= card.y && mouseY < card.y + card.h
+                        && mouseY >= cy && mouseY < cy + ch) {
+                    currentHoveredModule = card.module;
+                    break;
+                }
+            }
+        }
+
         GuiRender.scissor(cx, cy, cw, ch);
 
         if (selectedCategory == ModuleList.Themes && searchQuery.trim().isEmpty()) {
@@ -378,6 +396,83 @@ public final class ClickGuiScreen extends Screen {
 
         GuiRender.resetScissor();
         drawScrollbar(cx, cy, cw, ch);
+    }
+
+    private void renderFloatingDescription() {
+        boolean active = currentHoveredModule != null && hasDescription(currentHoveredModule);
+        float target = active ? 1f : 0f;
+        descAnim += (target - descAnim) * 0.22f;
+        if (Math.abs(descAnim - target) < 0.005f) {
+            descAnim = target;
+        }
+
+        if (active) {
+            lastHoveredModule = currentHoveredModule;
+        }
+
+        if (descAnim <= 0.01f || lastHoveredModule == null) {
+            return;
+        }
+
+        String modName = lastHoveredModule.getName();
+        String desc = lastHoveredModule.getDesc();
+        if (desc == null || desc.isBlank()) {
+            return;
+        }
+
+        int alpha = (int) (255 * descAnim);
+
+        double nameW = GuiDrawUtil.textWidth(modName, GuiDrawUtil.BODY_SIZE, GuiRender.Weight.SEMIBOLD);
+        double sepW = GuiDrawUtil.textWidth("—", GuiDrawUtil.BODY_SIZE, GuiRender.Weight.REGULAR);
+
+        double maxDescW = Math.min(320, W - 40 - nameW - sepW);
+        String trimmedDesc = GuiDrawUtil.trim(desc, maxDescW, GuiDrawUtil.SMALL_SIZE, GuiRender.Weight.REGULAR);
+        double descW = GuiDrawUtil.textWidth(trimmedDesc, GuiDrawUtil.SMALL_SIZE, GuiRender.Weight.REGULAR);
+
+        double pillH = 22;
+        double pillW = 10 + 3 + 7 + nameW + 7 + sepW + 7 + descW + 10;
+        double pillX = windowX + (W - pillW) / 2.0;
+
+        // Плавно выплывает на 4 px вниз при появлении
+        double baseY = windowY - pillH - 7;
+        double pillY = baseY + (1f - descAnim) * 4;
+
+        // Тень вокруг плашки
+        int shadowColor = GuiDrawUtil.withAlpha(0x000000, (int) (45 * descAnim));
+        GuiRender.rect(pillX - 2, pillY - 1, pillW + 4, pillH + 4, shadowColor, 6);
+
+        // Карточка плашки
+        int bg = GuiDrawUtil.withAlpha(Theme.BG_PANEL, (int) (245 * descAnim));
+        int borderA = GuiDrawUtil.withAlpha(Theme.BORDER_BRIGHT, (int) (200 * descAnim));
+        int borderB = GuiDrawUtil.withAlpha(Theme.BORDER_DARK, (int) (200 * descAnim));
+        GuiDrawUtil.drawCard(pillX, pillY, pillW, pillH, bg, bg, borderA, borderB, 5);
+
+        // Акцентная плашка-индикатор
+        double indH = 8;
+        double iy = pillY + (pillH - indH) / 2.0;
+        GuiRender.rect(pillX + 9, iy, 3, indH,
+                GuiDrawUtil.withAlpha(Theme.accent(), alpha), 1.5);
+
+        // Имя модуля
+        double nameH = GuiDrawUtil.textHeight(GuiDrawUtil.BODY_SIZE, GuiRender.Weight.SEMIBOLD);
+        double ny = pillY + (pillH - nameH) / 2.0 - 0.5;
+        GuiDrawUtil.drawText(modName, pillX + 18, ny,
+                GuiDrawUtil.withAlpha(Theme.TEXT_WHITE, alpha),
+                GuiDrawUtil.BODY_SIZE, GuiRender.Weight.SEMIBOLD);
+
+        // Разделитель
+        double sepX = pillX + 18 + nameW + 7;
+        GuiDrawUtil.drawText("—", sepX, ny,
+                GuiDrawUtil.withAlpha(Theme.TEXT_DIM, alpha),
+                GuiDrawUtil.BODY_SIZE, GuiRender.Weight.REGULAR);
+
+        // Описание
+        double descX = sepX + sepW + 7;
+        double descH = GuiDrawUtil.textHeight(GuiDrawUtil.SMALL_SIZE, GuiRender.Weight.REGULAR);
+        double dy = pillY + (pillH - descH) / 2.0 - 0.5;
+        GuiDrawUtil.drawText(trimmedDesc, descX, dy,
+                GuiDrawUtil.withAlpha(Theme.TEXT_SOFT, alpha),
+                GuiDrawUtil.SMALL_SIZE, GuiRender.Weight.REGULAR);
     }
 
     private void drawScrollbar(int cx, int cy, int cw, int ch) {
@@ -424,10 +519,10 @@ public final class ClickGuiScreen extends Screen {
             int height = cardHeight(module);
 
             CardLayout card = new CardLayout(module, columnX[column], columnY[column],
-                    Theme.CARD_W, height, headerHeight(module));
+                    Theme.CARD_W, height);
 
             if (!collapsedModules.contains(module)) {
-                int settingY = card.y + card.headerH + Theme.CARD_PAD;
+                int settingY = card.y + Theme.CARD_HEADER_H + Theme.CARD_PAD;
                 for (Setting<?> setting : module.getSettings()) {
                     if (!setting.isVisible()) {
                         continue;
@@ -454,26 +549,19 @@ public final class ClickGuiScreen extends Screen {
     }
 
     private int cardHeight(Module module) {
-        int headerH = headerHeight(module);
         boolean expanded = !collapsedModules.contains(module)
                 && hasVisibleSettings(module);
         if (!expanded) {
-            return headerH + Theme.CARD_PAD;
+            return Theme.CARD_HEADER_H + Theme.CARD_PAD;
         }
 
-        int height = headerH + Theme.CARD_PAD * 2;
+        int height = Theme.CARD_HEADER_H + Theme.CARD_PAD * 2;
         for (Setting<?> setting : module.getSettings()) {
             if (setting.isVisible()) {
                 height += settingHeight(setting);
             }
         }
         return height;
-    }
-
-    private int headerHeight(Module module) {
-        return hasDescription(module)
-                ? Theme.CARD_HEADER_H + Theme.CARD_DESC_H
-                : Theme.CARD_HEADER_H;
     }
 
     private boolean hasDescription(Module module) {
@@ -562,15 +650,19 @@ public final class ClickGuiScreen extends Screen {
         boolean collapsed = collapsedModules.contains(module);
         double chevronSpace = collapsible ? 18 : 0;
 
+        double titleH = GuiDrawUtil.textHeight(GuiDrawUtil.TITLE_SIZE, GuiRender.Weight.SEMIBOLD);
+        double titleY = card.y + (Theme.CARD_HEADER_H - titleH) / 2.0 - 0.5;
+        double headerCenterY = card.y + Theme.CARD_HEADER_H / 2.0;
+
         double keyWidth = 0;
         if (keyLabel != null) {
             keyWidth = GuiDrawUtil.textWidth(keyLabel, GuiDrawUtil.TINY_SIZE,
                     GuiRender.Weight.MEDIUM);
+            double keyH = GuiDrawUtil.textHeight(GuiDrawUtil.TINY_SIZE, GuiRender.Weight.MEDIUM);
+            double keyY = card.y + (Theme.CARD_HEADER_H - keyH) / 2.0 - 0.5;
             GuiDrawUtil.drawText(keyLabel,
                     card.x + card.w - 10 - chevronSpace - keyWidth,
-                    card.y + (Theme.CARD_HEADER_H
-                            - GuiDrawUtil.textHeight(GuiDrawUtil.TINY_SIZE,
-                            GuiRender.Weight.MEDIUM)) / 2 - 0.5,
+                    keyY,
                     listening ? Theme.accent() : GuiDrawUtil.withAlpha(Theme.TEXT_LIGHT, 0x99),
                     GuiDrawUtil.TINY_SIZE, GuiRender.Weight.MEDIUM);
         }
@@ -579,14 +671,11 @@ public final class ClickGuiScreen extends Screen {
                 - (keyWidth > 0 ? keyWidth + 8 : 0);
         name = GuiDrawUtil.trim(name, titleMax, GuiDrawUtil.TITLE_SIZE,
                 GuiRender.Weight.SEMIBOLD);
-        double titleY = card.y + (Theme.CARD_HEADER_H
-                - GuiDrawUtil.textHeight(GuiDrawUtil.TITLE_SIZE,
-                GuiRender.Weight.SEMIBOLD)) / 2 - 0.5;
         GuiDrawUtil.drawText(name, card.x + 10, titleY, nameColor,
                 GuiDrawUtil.TITLE_SIZE, GuiRender.Weight.SEMIBOLD);
 
         if (collapsible) {
-            drawCollapseChevron(card, collapsed);
+            drawCollapseChevron(card, collapsed, headerCenterY);
         }
 
         for (SettingLayout layout : card.settings) {
@@ -595,9 +684,8 @@ public final class ClickGuiScreen extends Screen {
     }
 
     /** Маленький указатель в шапке: сворачивает и разворачивает настройки модуля. */
-    private void drawCollapseChevron(CardLayout card, boolean collapsed) {
+    private void drawCollapseChevron(CardLayout card, boolean collapsed, double cy) {
         double cx = card.x + card.w - 13;
-        double cy = card.y + Theme.CARD_HEADER_H / 2.0;
         int color = GuiDrawUtil.withAlpha(Theme.TEXT_LIGHT, 0xDD);
 
         if (collapsed) {
@@ -877,6 +965,7 @@ public final class ClickGuiScreen extends Screen {
         int cx = windowX + Theme.SIDEBAR_W;
         int cy = windowY;
         int cw = W - Theme.SIDEBAR_W;
+
         if (mx >= cx && mx < cx + cw && my >= cy && my < cy + H) {
             if (selectedCategory == ModuleList.Themes && searchQuery.trim().isEmpty()) {
                 return mouseClickedThemes(mx, my, cx, cy);
@@ -895,7 +984,7 @@ public final class ClickGuiScreen extends Screen {
                     }
                 }
 
-                if (my < card.y + Theme.CARD_HEADER_H) {
+                if (card.settings.isEmpty() || my < card.y + Theme.CARD_HEADER_H) {
                     if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT
                             && hasVisibleSettings(card.module)
                             && mx >= card.x + card.w - 26) {

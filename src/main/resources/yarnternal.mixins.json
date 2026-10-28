@@ -4,7 +4,13 @@
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [],
 	"client": [
-		"KeyboardMixin"
+		"KeyboardMixin",
+		"ClientPlayerEntityMixin",
+		"ClientPlayerEntityAccessor",
+		"ClientPlayerInteractionManagerAccessor",
+		"ClientPlayNetworkHandlerMixin",
+		"DebugHudMixin",
+		"LivingEntityRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

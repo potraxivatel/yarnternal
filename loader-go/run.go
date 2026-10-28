@@ -33,7 +33,7 @@ func runRunClient(root string, s settings) {
 	fmt.Println()
 
 	cmd := exec.Command("./gradlew", "runClient",
-		"-PmcUsername="+s.Username, "-PmcRam="+s.Ram, "--console=plain")
+		"-PmcUsername="+s.Username, "-PmcRam="+s.Ram, "--console=plain", "--offline")
 	cmd.Dir = root
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := cmd.Run()
@@ -56,7 +56,7 @@ func runPrism(root string, s settings) {
 	}
 
 	fmt.Println("   " + styleGreen.Render("▸ собираю мод..."))
-	build := exec.Command("./gradlew", "build", "--console=plain", "-q")
+	build := exec.Command("./gradlew", "build", "--console=plain", "-q", "--offline")
 	build.Dir = root
 	build.Stdin, build.Stdout, build.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := build.Run(); err != nil {

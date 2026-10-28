@@ -120,11 +120,15 @@ public final class GuiRender {
     /** Текстура в GUI-координатах (аватарки и другие готовые изображения). */
     public static void texture(Identifier id, double x, double y,
                                double width, double height, int color) {
-        // Текстура рисуется отдельным проходом, поэтому сначала отдаём
-        // накопленный батч, иначе она окажется под уже нарисованным GUI.
+        texture(id, x, y, width, height, 0.0, color);
+    }
+
+    /** Текстура в GUI-координатах с поворотом (для TargetESP и анимированных иконок). */
+    public static void texture(Identifier id, double x, double y,
+                               double width, double height, double rotation, int color) {
         flush();
         HudRenderer.INSTANCE.texture(id, x * scale, y * scale,
-                width * scale, height * scale, color(color));
+                width * scale, height * scale, rotation, color(color));
     }
 
     public static void rect(double x, double y, double width, double height, int color) {

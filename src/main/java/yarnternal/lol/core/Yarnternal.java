@@ -1,5 +1,10 @@
 package yarnternal.lol.core;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.List;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -31,6 +36,10 @@ public class Yarnternal implements ModInitializer {
     // просто по приколу добавил хотя возможно это топ
     @NonFinal
     boolean initialize;
+
+    @NonFinal
+    @Getter
+    Gson gson = new Gson();
 
     // создаётся в initProvider(); @NonFinal нужен, т.к. @FieldDefaults делает поля
     // final
@@ -92,6 +101,22 @@ public class Yarnternal implements ModInitializer {
         colorTwo = ColorUtil.fromHex(newStyle.colorTwo());
     }
 
+    public void initUser() {
+        try (InputStream is = Yarnternal.class.getResourceAsStream("data.json");
+                InputStreamReader reader = new InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8)) {
+
+            // Читаем JSON как одну общую универсальную структуру
+            JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
+
+            // Теперь просто достаем любые данные по их именам на ходу!
+            String name = json.get("nickkname").getAsString();
+            long uid = json.get("uid").getAsLong();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+    }
+
     public void initManager() {
         // вот тут будет инит всех менеджерей/демнов и тд типо вот
         // Foks foks = new foks();
@@ -117,7 +142,12 @@ public class Yarnternal implements ModInitializer {
         // меню клиента: открытие по правому Shift (.menu — то же самое)
         ClickGuiManager.init();
 
-        // тик: Fabric зовёт нас 20 раз в секунду -> событие подписчикам
+        // старт тика: до обработки ввода и пакетов движения
+        ClientTickEvents.START_CLIENT_TICK.register(client -> {
+            moduleProvider.onStartTick();
+        });
+
+        // конец тика: Fabric зовёт нас 20 раз в секунду -> событие подписчикам
         // и хуки включённым модулям
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             eventManager.call(new TickEvent());
@@ -228,13 +258,13 @@ public class Yarnternal implements ModInitializer {
 
     // HUD — регистрируем тут (раньше жило в YarnternalClient, который удалили)
     public void initHud() {
-        // витрина рендера: подписывается на Render2DEvent и рисует шейдером
-        // (скругления, градиенты, свой шрифт) — см. ColorTestHud
-        eventManager.register(new ColorTestHud());
+        // витрина рендера: ColorTestHud отключен, чтобы не перекрывать экран
+        // eventManager.register(new ColorTestHud());
 
         // модули рисуют свой HUD поверх всего (addLast = самый верхний слой).
         // Render2DEvent больше не тут: его постит рендер-хук в конце InGameHud.render,
-        // когда открыт кадр HudRenderer (так подписчики видят и DrawContext, и шейдерный рендер)
+        // когда открыт кадр HudRenderer (так подписчики видят и DrawContext, и
+        // шейдерный рендер)
         HudElementRegistry.addLast(
                 Identifier.of("yarnternal", "modules"),
                 (context, tickCounter) -> {
@@ -257,6 +287,7 @@ public class Yarnternal implements ModInitializer {
         initManager();
         initProvider();
         initHud();
+        initUser();
 
         System.out.println(clientInfoProvider.getFullInfo());
 

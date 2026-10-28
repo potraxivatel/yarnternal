@@ -6,6 +6,7 @@ import lombok.experimental.FieldDefaults;
 import lombok.experimental.NonFinal;
 import net.minecraft.client.gui.DrawContext;
 import yarnternal.lol.api.utility.client.IMinecraft;
+import yarnternal.lol.api.utility.sound.SoundUtil;
 import yarnternal.lol.common.settings.Setting;
 import yarnternal.lol.core.Yarnternal;
 
@@ -24,6 +25,9 @@ public class Module implements IMinecraft {
     }
 
     public void onDisable() {
+    }
+
+    public void onStartTick() {
     }
 
     public void onTick() {
@@ -81,6 +85,11 @@ public class Module implements IMinecraft {
             onDisable();
             // снимаем подписки: выключенный модуль молчит до следующего включения
             Yarnternal.getInstance().getEventManager().unregister(this);
+        }
+
+        // Звук переключения модуля (только если мир загружен, чтобы не спамить при старте)
+        if (mc.world != null) {
+            SoundUtil.playToggle(enabled);
         }
     }
 

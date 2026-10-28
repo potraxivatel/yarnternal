@@ -26,10 +26,6 @@ public final class ModeSetting extends Setting<String> {
         }
     }
 
-    public ModeSetting(String name, String... modes) {
-        this(name, modes.length > 0 ? modes[0] : "", modes);
-    }
-
     /** Проверка текущего режима без учета регистра (как в Expensive: mode.is("Matrix")). */
     public boolean is(String modeName) {
         return get().equalsIgnoreCase(modeName);

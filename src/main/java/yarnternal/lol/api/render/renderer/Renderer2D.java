@@ -224,6 +224,10 @@ public class Renderer2D {
         );
     }
 
+    public void texQuad(double x, double y, double width, double height, double rotation, Color color) {
+        texQuad(x, y, width, height, rotation, 0, 0, 1, 1, color);
+    }
+
     public void texQuad(double x, double y, double width, double height, double rotation, double texX1, double texY1, double texX2, double texY2, Color color) {
         triangles.ensureQuadCapacity();
 

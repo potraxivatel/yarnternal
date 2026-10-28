@@ -35,17 +35,20 @@ public abstract class InGameHudMixin {
         Utils.unscaledProjection();
         HudRenderer.INSTANCE.begin(context);
 
-        Yarnternal.getInstance().getEventManager().call(new Render2DEvent(
-                context,
-                context.getScaledWindowWidth(),
-                context.getScaledWindowHeight(),
-                Utils.frameTime,
-                tickCounter.getTickProgress(true)
-        ));
-
-        HudRenderer.INSTANCE.end();
-
-        context.createNewRootLayer();
-        Utils.scaledProjection();
+        try {
+            Yarnternal.getInstance().getEventManager().call(new Render2DEvent(
+                    context,
+                    context.getScaledWindowWidth(),
+                    context.getScaledWindowHeight(),
+                    Utils.frameTime,
+                    tickCounter.getTickProgress(true)
+            ));
+        } catch (Throwable t) {
+            t.printStackTrace();
+        } finally {
+            HudRenderer.INSTANCE.end();
+            context.createNewRootLayer();
+            Utils.scaledProjection();
+        }
     }
 }

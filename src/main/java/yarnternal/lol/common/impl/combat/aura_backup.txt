@@ -1,0 +1,638 @@
+package yarnternal.lol.common.impl.combat;
+
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.entity.passive.AnimalEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.util.Hand;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
+import yarnternal.lol.api.utility.math.MathUtil;
+import yarnternal.lol.common.api.Module;
+import yarnternal.lol.common.api.ModuleAnnotation;
+import yarnternal.lol.common.api.ModuleList;
+import yarnternal.lol.common.settings.BooleanSetting;
+import yarnternal.lol.common.settings.ModeSetting;
+import yarnternal.lol.common.settings.MultiBooleanSetting;
+import yarnternal.lol.common.settings.NumberSetting;
+import yarnternal.lol.core.Yarnternal;
+import yarnternal.lol.mixin.ClientPlayerEntityAccessor;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+
+/**
+ * Aura — автоматическая атака противников в радиусе действия.
+ * <ul>
+ *   <li><b>1.9+ PvP</b> — синхронизация с кулдауном оружия и криты в падении.</li>
+ *   <li><b>1.8 PvP</b> — джиттер-кликер по CPS таймеру (для мини-игр).</li>
+ *   <li><b>Vulcan обход</b> — честный целочисленный GCD расчет шага мыши; удар идёт
+ *       по ротации, которую сервер уже получил в прошлом тике.</li>
+ * </ul>
+ */
+@ModuleAnnotation(name = "Aura", desc = "Автоматическая атака ближайших целей", type = ModuleList.Combat)
+public class Aura extends Module {
+
+    private final ModeSetting pvpType = addSetting(
+            new ModeSetting("PvP Type", "1.9", "1.9", "1.8")
+    );
+
+    private final ModeSetting rotations = addSetting(
+            new ModeSetting("Rotations", "Vulcan", "Vulcan", "Smooth", "Snap", "Vanilla")
+    );
+
+    private final NumberSetting aimSpeed = addSetting(
+            new NumberSetting("Aim Speed", 90.0, 20.0, 100.0, 5.0, "%").visible(() -> !rotations.is("Vanilla"))
+    );
+
+    private final BooleanSetting clientLook = addSetting(
+            new BooleanSetting("Client Look", true)
+    );
+
+    private final ModeSetting sort = addSetting(
+            new ModeSetting("Sort", "Distance", "Distance", "Health", "Armor", "Fov")
+    );
+
+    private final NumberSetting range = addSetting(
+            new NumberSetting("Range", 3.0, 2.5, 6.0, 0.1, "m")
+    );
+
+    // ── 1.9+ PvP (Expensive style) ──────────────────────────────────────
+    private final BooleanSetting cooldown = addSetting(
+            new BooleanSetting("Cooldown", true).visible(() -> pvpType.is("1.9"))
+    );
+
+    private final BooleanSetting onlyCrits = addSetting(
+            new BooleanSetting("Only Crits", false).visible(() -> pvpType.is("1.9"))
+    );
+
+    private final BooleanSetting unpressShield = addSetting(
+            new BooleanSetting("Unpress Shield", true).visible(() -> pvpType.is("1.9"))
+    );
+
+    /**
+     * Сброс спринта перед ударом.
+     * <ul>
+     *   <li><b>Packet</b> — STOP перед ударом и START сразу после него. Спринт
+     *       не проседает, но после UseEntity уходит EntityAction.</li>
+     *   <li><b>Legit</b> — STOP перед ударом, затем клиент один тик идёт
+     *       пешком (как при ручном W-tap), а START уходит в конце тика уже
+     *       после movement-пакета.</li>
+     * </ul>
+     * В обоих режимах удар летит после STOP: сервер не добавляет спринтовый
+     * knockback, а криты считаются как в ванилле.
+     */
+    private final ModeSetting sprintReset = addSetting(
+            new ModeSetting("Sprint Reset", "Legit", "Off", "Packet", "Legit")
+                    .visible(() -> pvpType.is("1.9"))
+    );
+
+    // ── 1.8 PvP (CPS) ───────────────────────────────────────────────────
+    private final NumberSetting minCps = addSetting(
+            new NumberSetting("Min CPS", 11.0, 1.0, 20.0, 1.0, "").visible(() -> pvpType.is("1.8"))
+    );
+
+    private final NumberSetting maxCps = addSetting(
+            new NumberSetting("Max CPS", 15.0, 1.0, 20.0, 1.0, "").visible(() -> pvpType.is("1.8"))
+    );
+
+    // ── Фильтры целей (MultiBooleanSetting) ─────────────────────────────
+    private final MultiBooleanSetting targets = addSetting(
+            new MultiBooleanSetting("Targets",
+                    List.of("Players", "Monsters", "Animals", "Invisibles"),
+                    List.of("Players", "Invisibles")
+            )
+    );
+
+    private final BooleanSetting raycast = addSetting(
+            new BooleanSetting("Raycast", true)
+    );
+
+    private LivingEntity currentTarget = null;
+    private float serverYaw = 0.0f;
+    private float serverPitch = 0.0f;
+    private float prevServerYaw = 0.0f;
+    private float prevServerPitch = 0.0f;
+    private boolean hasRotated = false;
+    private boolean hasSentRotation = false;
+    private float lastSentYaw = 0.0f;
+    private float lastSentPitch = 0.0f;
+    private LivingEntity lastSentTarget = null;
+    private float lastClampedYaw = 0.0f;
+
+    private long lastAttackTime = 0L;
+    private long currentDelay = 0L;
+
+    /** Legit-сброс: ждём END тика, чтобы START ушёл после movement-пакета. */
+    private boolean sprintResetPending = false;
+    /** На тике удара не даём ClientPlayerEntity снова включить спринт. */
+    private boolean sprintResetSuppress = false;
+
+    @Override
+    public void onStartTick() {
+        if (mc.player == null || mc.world == null) {
+            resetRotation();
+            clearSprintReset();
+            currentTarget = null;
+            return;
+        }
+
+        // CrystalBind сам ведёт камеру на обсидиан. Пока макрос активен,
+        // Aura не должна перебивать его ротацию и бить по старой цели.
+        Yarnternal yarnternal = Yarnternal.getInstance();
+        if (yarnternal != null && yarnternal.getModuleProvider() != null) {
+            CrystalBind crystalBind = yarnternal.getModuleProvider().getModule(CrystalBind.class);
+            if (crystalBind != null && crystalBind.isActive()) {
+                currentTarget = null;
+                resetRotation();
+                return;
+            }
+        }
+
+        LivingEntity target = findTarget();
+        currentTarget = target;
+        if (target == null) {
+            resetRotation();
+            return;
+        }
+
+        // Expensive: бьём ДО отправки movement-пакета этого тика.
+        // Сервер уже получил нашу ротацию в прошлом тике — ею и бьём.
+        // Дополнительных look-пакетов нет; EntityAction бывает только
+        // от Sprint Reset и строго до/после удара, не меняя его позицию.
+        if (hasSentRotation && lastSentTarget == target) {
+            attack(target);
+        }
+
+        // Считаем ротацию на этот тик; миксин отправит её
+        // в обычном movement-пакете чуть позже.
+        rotateToTarget(target);
+    }
+
+    @Override
+    public void onTick() {
+        // Legit: START отправляем в конце тика, уже после sendMovementPackets.
+        // Клиент весь этот тик шёл пешком (mixin не дал ему снова включить
+        // спринт), поэтому его скорость совпадает с серверным состоянием.
+        if (!sprintResetPending) return;
+        sprintResetPending = false;
+        sprintResetSuppress = false;
+        if (shouldResumeSprint()) {
+            startSprint();
+        }
+    }
+
+    /**
+     * Вызывается из {@link yarnternal.lol.mixin.ClientPlayerEntityMixin}
+     * перед {@code super.tickMovement()}. На тике Legit-удара возвращаем
+     * клиенту пешую скорость, иначе он разгонится, пока сервер считает
+     * игрока идущим.
+     */
+    public boolean shouldSuppressSprint() {
+        return isToggled() && sprintResetPending && sprintResetSuppress;
+    }
+
+    /** Восстанавливаем спринт только если игрок всё ещё его удерживает. */
+    private boolean shouldResumeSprint() {
+        if (mc.player == null || mc.player.networkHandler == null) return false;
+
+        boolean sprintInput = mc.player.input != null
+                && mc.player.input.playerInput != null
+                && mc.player.input.playerInput.sprint();
+        if (!sprintInput && mc.options != null && mc.options.sprintKey != null) {
+            sprintInput = mc.options.sprintKey.isPressed();
+        }
+        if (!sprintInput) return false;
+
+        if (mc.player.getHungerManager().getFoodLevel() <= 6) return false;
+        if (mc.player.isUsingItem() || mc.player.isBlocking()) return false;
+        return !mc.player.isTouchingWater()
+                && !mc.player.isInLava()
+                && !mc.player.isClimbing()
+                && !mc.player.hasVehicle()
+                && !mc.player.getAbilities().flying;
+    }
+
+    private void stopSprint() {
+        mc.player.networkHandler.sendPacket(
+                new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.STOP_SPRINTING)
+        );
+        mc.player.setSprinting(false);
+        markLastSprinting(false);
+    }
+
+    private void startSprint() {
+        mc.player.networkHandler.sendPacket(
+                new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_SPRINTING)
+        );
+        mc.player.setSprinting(true);
+        markLastSprinting(true);
+    }
+
+    /**
+     * Синхронизируем приватный {@code lastSprinting} клиента с ручным
+     * EntityAction. Иначе в конце тика ваниль отправит второй STOP/START.
+     */
+    private void markLastSprinting(boolean sprinting) {
+        if (mc.player instanceof ClientPlayerEntityAccessor accessor) {
+            accessor.yarnternal$setLastSprinting(sprinting);
+        }
+    }
+
+    private void clearSprintReset() {
+        sprintResetPending = false;
+        sprintResetSuppress = false;
+    }
+
+    /**
+     * Вызывается миксином в момент отправки movement-пакета:
+     * запоминаем ровно те углы, которые реально получил сервер.
+     */
+    public void markRotationSent(float yaw, float pitch) {
+        if (!hasRotated || currentTarget == null) {
+            return;
+        }
+        lastSentYaw = yaw;
+        lastSentPitch = pitch;
+        lastSentTarget = currentTarget;
+        hasSentRotation = true;
+    }
+
+    private void resetRotation() {
+        if (hasRotated && mc.player != null) {
+            prevServerYaw = serverYaw;
+            prevServerPitch = serverPitch;
+            serverYaw = mc.player.getYaw();
+            serverPitch = mc.player.getPitch();
+            hasRotated = false;
+        }
+        hasSentRotation = false;
+        lastSentTarget = null;
+        lastClampedYaw = 0.0f;
+    }
+
+    /**
+     * Поиск приоритетной цели в радиусе действия.
+     */
+    private LivingEntity findTarget() {
+        if (mc.player == null || mc.world == null) return null;
+
+        double maxDist = range.getValue();
+
+        // Удержание текущей цели, пока она жива и находится в радиусе (target lock)
+        if (currentTarget != null && isValidTarget(currentTarget, maxDist)) {
+            return currentTarget;
+        }
+
+        List<LivingEntity> list = new ArrayList<>();
+        for (Entity entity : mc.world.getEntities()) {
+            if (!(entity instanceof LivingEntity living)) continue;
+            if (!isValidTarget(living, maxDist)) continue;
+            list.add(living);
+        }
+
+        if (list.isEmpty()) return null;
+
+        switch (sort.get()) {
+            case "Health" -> list.sort(Comparator.comparingDouble(LivingEntity::getHealth));
+            case "Armor" -> list.sort(Comparator.comparingDouble(LivingEntity::getArmor));
+            case "Fov" -> list.sort(Comparator.comparingDouble(this::getFovToEntity));
+            default -> list.sort(Comparator.comparingDouble(this::getDistanceToBox));
+        }
+
+        return list.get(0);
+    }
+
+    /**
+     * Expensive: точная дистанция от глаз игрока до ближайшей точки хитбокса цели.
+     * Предотвращает ложный разрыв дистанции при прыжках для критов!
+     */
+    private double getDistanceToBox(Entity target) {
+        if (mc.player == null) return 100.0;
+        Vec3d eye = mc.player.getEyePos();
+        Box box = target.getBoundingBox();
+        double cx = MathUtil.clamp(eye.x, box.minX, box.maxX);
+        double cy = MathUtil.clamp(eye.y, box.minY, box.maxY);
+        double cz = MathUtil.clamp(eye.z, box.minZ, box.maxZ);
+        return eye.distanceTo(new Vec3d(cx, cy, cz));
+    }
+
+    /**
+     * Проверка валидности цели через MultiBooleanSetting.
+     */
+    private boolean isValidTarget(LivingEntity entity, double maxDist) {
+        if (entity == mc.player) return false;
+        if (!entity.isAlive() || entity.isDead()) return false;
+        if (getDistanceToBox(entity) > maxDist) return false;
+
+        // Фильтрация проверочных ботов античита (AntiBot)
+        if (AntiBot.isBot(entity)) {
+            return false;
+        }
+
+        if (entity instanceof PlayerEntity player) {
+            if (!targets.isSelected("Players")) return false;
+            if (player.isCreative() || player.isSpectator()) return false;
+        } else if (entity instanceof HostileEntity) {
+            if (!targets.isSelected("Monsters")) return false;
+        } else if (entity instanceof AnimalEntity) {
+            if (!targets.isSelected("Animals")) return false;
+        } else {
+            return false;
+        }
+
+        if (entity.isInvisible() && !targets.isSelected("Invisibles")) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Поворот камеры на цель в стилях Expensive / Vulcan с абсолютно чистым целочисленным GCD шагом.
+     */
+    private void rotateToTarget(LivingEntity target) {
+        if (mc.player == null) return;
+
+        // Expensive AuraVectors: динамический расчет точки наводки по высоте
+        Vec3d aimPos = getAimVector(target);
+        Vec3d eyePos = mc.player.getEyePos();
+
+        double dx = aimPos.x - eyePos.x;
+        double dy = aimPos.y - eyePos.y;
+        double dz = aimPos.z - eyePos.z;
+
+        float targetYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float targetPitch = (float) Math.toDegrees(-Math.atan2(dy, Math.hypot(dx, dz)));
+
+        float gcd = getGCD();
+        if (!hasRotated) {
+            serverYaw = mc.player.getYaw();
+            serverPitch = mc.player.getPitch();
+        }
+        prevServerYaw = serverYaw;
+        prevServerPitch = serverPitch;
+
+        float diffYaw = MathUtil.wrapDegrees(targetYaw - serverYaw);
+        float diffPitch = targetPitch - serverPitch;
+
+        float speedMult = (float) (aimSpeed.getValue() / 100.0);
+        // Expensive: 80°/тик по yaw и 35°/тик по pitch (pitch в плавной еще /3)
+        float yawSpeed = Math.max(1.0f, 80.0f * speedMult);
+        float pitchSpeed = Math.max(1.0f, 35.0f * speedMult);
+
+        switch (rotations.get()) {
+            case "Vanilla" -> {
+                serverYaw = targetYaw;
+                serverPitch = targetPitch;
+            }
+            case "Snap" -> {
+                // Резкая: мгновенный доворот шагами, кратными сенсе (GCD)
+                int px = Math.round(diffYaw / gcd);
+                int py = Math.round(diffPitch / gcd);
+                serverYaw += px * gcd;
+                serverPitch = MathUtil.clamp(serverPitch + py * gcd, -89.0f, 89.0f);
+            }
+            default -> {
+                // Плавная (Expensive): ограниченный шаг + антиконстантный разгон
+                float clampedYaw = Math.min(Math.max(Math.abs(diffYaw), 1.0f), yawSpeed);
+                float clampedPitch = Math.min(Math.max(Math.abs(diffPitch), 1.0f), pitchSpeed) / 3.0f;
+
+                // В пределах градуса не дергаем камеру туда-сюда (иначе Client Look вибрирует)
+                if (Math.abs(diffYaw) <= 1.0f) clampedYaw = 0.0f;
+                if (Math.abs(diffPitch) <= 1.0f) clampedPitch = 0.0f;
+
+                if (Math.abs(diffYaw) > 4.0f && Math.abs(clampedYaw - lastClampedYaw) <= 3.0f) {
+                    clampedYaw = lastClampedYaw + 3.1f;
+                }
+                lastClampedYaw = clampedYaw;
+
+                // Vulcan: легкий джиттер, чтобы шаг не был идеально константным
+                if (rotations.is("Vulcan")) {
+                    clampedYaw *= ThreadLocalRandom.current().nextFloat(0.92f, 1.08f);
+                    clampedPitch *= ThreadLocalRandom.current().nextFloat(0.92f, 1.08f);
+                }
+
+                float stepYaw = diffYaw > 0 ? clampedYaw : -clampedYaw;
+                float stepPitch = diffPitch > 0 ? clampedPitch : -clampedPitch;
+
+                float yaw = serverYaw + stepYaw;
+                float pitch = MathUtil.clamp(serverPitch + stepPitch, -89.0f, 89.0f);
+
+                // Шаг кратен чувствительности мыши — иначе античит видит нечеловеческую ротацию
+                yaw -= (yaw - serverYaw) % gcd;
+                pitch -= (pitch - serverPitch) % gcd;
+
+                serverYaw = yaw;
+                serverPitch = pitch;
+            }
+        }
+
+        hasRotated = true;
+
+        // Переключатель Client Look: если включен — поворачиваем экран игрока, голову и тело, иначе Silent
+        if (clientLook.getValue()) {
+            mc.player.setYaw(serverYaw);
+            mc.player.setPitch(serverPitch);
+            mc.player.headYaw = serverYaw;
+            mc.player.bodyYaw = serverYaw;
+        }
+    }
+
+    /**
+     * Expensive AuraVectors: динамический расчет точки прицеливания по высоте
+     * в зависимости от относительного положения глаз игрока и хитбокса цели.
+     */
+    private Vec3d getAimVector(LivingEntity target) {
+        if (mc.player == null) return target.getEntityPos();
+        double eyeDiff = mc.player.getEyeY() - target.getY();
+        double factor = MathUtil.clamp(mc.player.distanceTo(target) / range.getValue(), 0.5, 1.0);
+        double yOffset = MathUtil.clamp(eyeDiff, 0.2, target.getHeight() * factor);
+        return new Vec3d(target.getX(), target.getY() + yOffset, target.getZ());
+    }
+
+    /**
+     * Формула чувствительности Minecraft (f^3 * 1.2F).
+     */
+    private float getGCD() {
+        float sens = (float) mc.options.getMouseSensitivity().getValue().doubleValue();
+        float f = sens * 0.6f + 0.2f;
+        return f * f * f * 1.2f;
+    }
+
+    /**
+     * Проверка рейкаста по углам, которые сервер уже получил в прошлом тике.
+     */
+    private boolean isLookingAt(LivingEntity target, float yaw, float pitch) {
+        if (mc.player == null) return false;
+        Vec3d eyePos = mc.player.getEyePos();
+        Box box = target.getBoundingBox().expand(target.getTargetingMargin());
+        if (box.contains(eyePos)) return true;
+        Vec3d lookVec = mc.player.getRotationVector(pitch, yaw);
+        Vec3d reachVec = eyePos.add(lookVec.multiply(range.getValue() + 0.5));
+        return box.raycast(eyePos, reachVec).isPresent();
+    }
+
+    /**
+     * Выполнение удара по цели (эталонная логика Expensive).
+     *
+     * <p>Удар отправляется в начале тика, то есть ДО обычного movement-пакета.
+     * Ротация для удара — та, что уже была отправлена серверу в прошлом тике.
+     * Новый шаг ротации считается после удара и уходит в movement-пакете этого
+     * же тика. Дополнительных look-пакетов нет; EntityAction возможен только
+     * от Sprint Reset.</p>
+     */
+    private void attack(LivingEntity target) {
+        if (mc.interactionManager == null || mc.player == null || mc.player.networkHandler == null) return;
+
+        long now = System.currentTimeMillis();
+
+        if (pvpType.is("1.9")) {
+            // 1. Полный (почти) кулдаун оружия. Ванильный прогресс уже учитывает
+            // скорость текущего оружия — отдельная задержка в мс только мешает.
+            float progress = mc.player.getAttackCooldownProgress(0.5f);
+            if (cooldown.getValue() && progress < 0.95f) {
+                return;
+            }
+
+            // 2. Only Crits. В воде/на лестнице/в транспорте крит невозможен,
+            // поэтому там Expensive просто бьет, не дожидаясь падения.
+            if (onlyCrits.getValue() && !cannotCrit() && (!isCritTiming() || progress < 0.9f)) {
+                return;
+            }
+        } else {
+            // 1.8 Кликер: расчет интервала по CPS с джиттером
+            if (now - lastAttackTime < currentDelay) {
+                return;
+            }
+
+            double min = Math.min(minCps.getValue(), maxCps.getValue());
+            double max = Math.max(minCps.getValue(), maxCps.getValue());
+            double targetCps = ThreadLocalRandom.current().nextDouble(min, max + 0.001);
+            currentDelay = (long) (1000.0 / targetCps);
+        }
+
+        // Рейкаст по той ротации, которую сервер уже знает.
+        if (raycast.getValue() && !isLookingAt(target, lastSentYaw, lastSentPitch)) {
+            return;
+        }
+
+        // Отжимать щит (Expensive: если игрок держит ПКМ — кратковременно опускаем щит для удара)
+        if (unpressShield.getValue() && mc.player.isBlocking()) {
+            mc.interactionManager.stopUsingItem(mc.player);
+        }
+
+        // Если противник держит щит и модуль ShieldBreaker включен — даем ShieldBreaker разбить щит топором
+        ShieldBreaker breaker = Yarnternal.getInstance().getModuleProvider().getModule(ShieldBreaker.class);
+        if (breaker != null && breaker.isToggled() && ShieldBreaker.findAxeSlot() != -1) {
+            if (target.isBlocking() || breaker.isBreaking()) {
+                return;
+            }
+        }
+
+        // Sprint Reset. STOP уходит до UseEntity, чтобы сервер снял спринт
+        // с удара. Packet сразу возвращает START; Legit оставляет клиент
+        // пешком на этот тик и отправляет START в onTick() после movement.
+        boolean resetSprint = pvpType.is("1.9")
+                && !sprintReset.is("Off")
+                && mc.player.isSprinting();
+        if (resetSprint) {
+            stopSprint();
+            if (sprintReset.is("Legit")) {
+                sprintResetPending = true;
+                sprintResetSuppress = true;
+            }
+        }
+
+        // Удар — до movement-пакета этого тика, по уже отправленной ротации.
+        mc.interactionManager.attackEntity(mc.player, target);
+        mc.player.swingHand(Hand.MAIN_HAND);
+
+        if (resetSprint && sprintReset.is("Packet")) {
+            startSprint();
+        }
+
+        lastAttackTime = now;
+    }
+
+    /** В этих состояниях крит невозможен в принципе. */
+    private boolean cannotCrit() {
+        if (mc.player == null) return true;
+        return mc.player.isTouchingWater() || mc.player.isInLava()
+                || mc.player.isClimbing() || mc.player.hasVehicle() || mc.player.getAbilities().flying;
+    }
+
+    /** Условия крита 1.9+, как в Expensive: в воздухе и уже есть fallDistance. */
+    private boolean isCritTiming() {
+        return mc.player != null && !cannotCrit()
+                && !mc.player.isOnGround() && mc.player.fallDistance > 0.0f;
+    }
+
+    private double getFovToEntity(Entity entity) {
+        if (mc.player == null) return 180.0;
+        double dx = entity.getX() - mc.player.getX();
+        double dz = entity.getZ() - mc.player.getZ();
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        return Math.abs(MathUtil.wrapDegrees(yaw - (hasRotated ? serverYaw : mc.player.getYaw())));
+    }
+
+    public LivingEntity getTarget() {
+        return currentTarget;
+    }
+
+    public float getServerYaw() {
+        return serverYaw;
+    }
+
+    public float getServerPitch() {
+        return serverPitch;
+    }
+
+    public float getPrevServerYaw() {
+        return prevServerYaw;
+    }
+
+    public float getPrevServerPitch() {
+        return prevServerPitch;
+    }
+
+    public boolean hasRotation() {
+        return isToggled() && currentTarget != null && hasRotated;
+    }
+
+    public boolean hasSilentRotation() {
+        return isToggled() && currentTarget != null && hasRotated && !clientLook.getValue();
+    }
+
+    @Override
+    public void onDisable() {
+        // Если выключили модуль между STOP и отложенным START, не оставляем
+        // игрока без спринта.
+        if (sprintResetPending && shouldResumeSprint()) {
+            startSprint();
+        }
+        clearSprintReset();
+
+        currentTarget = null;
+        hasRotated = false;
+        hasSentRotation = false;
+        lastSentTarget = null;
+        lastAttackTime = 0L;
+        currentDelay = 0L;
+        lastClampedYaw = 0.0f;
+        if (mc.player != null) {
+            serverYaw = mc.player.getYaw();
+            serverPitch = mc.player.getPitch();
+            prevServerYaw = serverYaw;
+            prevServerPitch = serverPitch;
+        }
+    }
+
+    public String getMode() {
+        return pvpType.get();
+    }
+}
